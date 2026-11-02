@@ -1,0 +1,41 @@
+zn "%SYS"
+
+; 1. Unexpire passwords and disable mandatory password change
+do ##class(Security.Users).UnExpireUserPasswords("*")
+set sc = ##class(Security.Users).Get("_SYSTEM",.uProps)
+if $$$ISOK(sc) set uProps("ChangePassword") = 0 do ##class(Security.Users).Modify("_SYSTEM",.uProps)
+
+; 2. Enable CallIn service for Embedded Python
+do ##class(Security.Services).Get("%Service_CallIn",.callinProps)
+set callinProps("Enabled") = 1
+set callinProps("AutheEnabled") = 48
+do ##class(Security.Services).Modify("%Service_CallIn",.callinProps)
+
+; 3. Enable Bindings service for Native API / SuperServer
+do ##class(Security.Services).Get("%Service_Bindings",.bindProps)
+set bindProps("Enabled") = 1
+do ##class(Security.Services).Modify("%Service_Bindings",.bindProps)
+
+; 4. Create SYNAPSE database and namespace if not already present
+if '##class(Config.Namespaces).Exists("SYNAPSE") { set dbDir = "/usr/irissys/mgr/SYNAPSE" if '##class(%File).DirectoryExists(dbDir) { do ##class(%File).CreateDirectoryChain(dbDir) } kill dbProps set dbProps("Directory") = dbDir do ##class(Config.Databases).Create("SYNAPSE", .dbProps) kill nsProps set nsProps("Globals") = "SYNAPSE" set nsProps("Routines") = "SYNAPSE" do ##class(Config.Namespaces).Create("SYNAPSE", .nsProps) }
+
+; 5. Enable Interoperability on SYNAPSE
+do ##class(%EnsembleMgr).EnableNamespace("SYNAPSE", 1)
+
+; 6. Enable Interoperability on IRISAPP if present
+if ##class(%SYS.Namespace).Exists("IRISAPP") do ##class(%EnsembleMgr).EnableNamespace("IRISAPP", 1)
+
+; 7. Switch to SYNAPSE namespace
+zn "SYNAPSE"
+
+; 8. Load and compile SynapseHealer source code
+if ##class(%File).DirectoryExists("/opt/irisapp/src") do $system.OBJ.LoadDir("/opt/irisapp/src", "ck", .err, 1)
+
+; 9. If module.xml exists and ZPM is available, load via package manager
+if ##class(%File).Exists("/opt/irisapp/module.xml") && $data(^|"%SYS"|SYS("ZPM")) zpm "load /opt/irisapp/ -v":1:1
+
+; 10. Also load into IRISAPP for judge compatibility if present
+if ##class(%SYS.Namespace).Exists("IRISAPP") { zn "IRISAPP" if ##class(%File).DirectoryExists("/opt/irisapp/src") do $system.OBJ.LoadDir("/opt/irisapp/src", "ck", .err2, 1) }
+
+zn "SYNAPSE"
+halt

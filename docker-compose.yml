@@ -1,0 +1,25 @@
+services:
+  synapse-iris:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        IRIS_IMAGE: ${IRIS_IMAGE:-iris-community:2027.1.0AI.109.0}
+    image: synapse-healer:latest
+    container_name: synapse-iris
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - IRIS_IMAGE=${IRIS_IMAGE:-iris-community:2027.1.0AI.109.0}
+      - SYNAPSE_MODE=${SYNAPSE_MODE:-replay}
+      - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+    ports:
+      - "1972:1972"
+      - "52773:52773"
+      - "8080:8080"
+    volumes:
+      - ./src:/opt/irisapp/src

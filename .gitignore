@@ -1,0 +1,9 @@
+*.tar.gz
+*.tar
+*.key
+.env
+.iris-agentic-dev.toml
+node_modules/
+.next/
+.reference/
+iris-agentic-dev
