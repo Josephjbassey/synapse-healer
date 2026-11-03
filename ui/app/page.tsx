@@ -104,12 +104,38 @@ function formatPayloadLines(payload: string, format: string): { lines: string[];
   return { lines: rawLines, mutatedIndices };
 }
 
+const DEFAULT_INITIAL_TRACE: HealTrace = {
+  payloadId: "SYN-HL7-B2CA3E77",
+  timestamp: "2026-11-03 12:13:07",
+  sourceSystem: "Epic_ADT_Gateway",
+  format: "HL7",
+  validationError: "HL7 Grammatical Ordering Violation: PV1 visit segment received prior to PID patient identification segment in ADT^A01 event",
+  rawPayload: "MSH|^~\\&|Epic_ADT|RegionalHospital|Synapse_Ingest|CentralCore|20261103100057||ADT^A01|MSG16723|P|2.5.1\rEVN|A01|20261103100057\rPV1|1|I|W402^BED01^HOSP||||1234^Welby^Marcus^Dr|||SUR|||||||ADM|V88632\rPID|1||PAT627028^^^MRN||DOE^JANE^M||19820514|F|||123 ELM ST^^BOSTON^MA^02108||(617)555-0199\r",
+  healedPayload: "MSH|^~\\&|Epic_ADT|RegionalHospital|Synapse_Ingest|CentralCore|20261103100057||ADT^A01|MSG16723|P|2.5.1\rEVN|A01|20261103100057\rPID|1||PAT627028^^^MRN||DOE^JANE^M||19820514|F|||123 ELM ST^^BOSTON^MA^02108||(617)555-0199\rPV1|1|I|W402^BED01^HOSP||||1234^Welby^Marcus^Dr|||SUR|||||||ADM|V88632\r",
+  decisionBranch: "AUTO_HEAL",
+  confidenceScore: 0.96,
+  riskLevel: "LOW",
+  matchedPatternId: "HL7-PID-PV1-INVERSION",
+  agentReasoning: "Re-sequenced HL7 segments to conform with HL7 v2.5.1 grammar: MSH -> EVN -> PID -> PV1. Grammatical sequence restored and validated.",
+  toolTrace: [
+    { step: 1, tool: "SearchRunbookRAG", input: { error: "PV1 before PID", format: "HL7" }, output: { matchedPattern: "HL7-PID-PV1-INVERSION", similarity: 0.96 }, durationMs: 42 },
+    { step: 2, tool: "ValidateRepairedPayload", input: { patternId: "HL7-PID-PV1-INVERSION" }, output: { valid: true, syntaxCheck: "PASSED", schemaCompliance: "100%" }, durationMs: 58 },
+    { step: 3, tool: "CalculateRiskScore", input: { patternId: "HL7-PID-PV1-INVERSION" }, output: { riskLevel: "LOW", confidence: 0.96, recommendedBranch: "AUTO_HEAL" }, durationMs: 35 },
+  ],
+  promptTokens: 479,
+  completionTokens: 176,
+  estimatedCostUSD: 0.000177,
+  latencyMs: 145,
+  executionMode: "replay",
+  workflowStatus: "NONE",
+};
+
 export default function SynapseDashboard() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [traces, setTraces] = useState<HealTrace[]>([]);
   const [runbooks, setRunbooks] = useState<Runbook[]>([]);
   const [tasks, setTasks] = useState<WorkflowTask[]>([]);
-  const [activeTrace, setActiveTrace] = useState<HealTrace | null>(null);
+  const [activeTrace, setActiveTrace] = useState<HealTrace | null>(DEFAULT_INITIAL_TRACE);
   const [activeTab, setActiveTab] = useState<"queue" | "rag" | "history">("queue");
   const [injecting, setInjecting] = useState<number | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
@@ -127,8 +153,8 @@ export default function SynapseDashboard() {
     setStatus(s);
     const t = await fetchTraces();
     setTraces(t);
-    if (t.length > 0 && !activeTrace) {
-      setActiveTrace(t[0]);
+    if (t.length > 0) {
+      setActiveTrace((prev) => (prev?.payloadId === DEFAULT_INITIAL_TRACE.payloadId ? t[0] : (prev || t[0])));
     }
     const r = await fetchRunbooks();
     setRunbooks(r);
@@ -565,7 +591,7 @@ export default function SynapseDashboard() {
 
                   {/* Footer Row: Target Segment & Trigger Button */}
                   <div className="mt-4 pt-3 border-t border-white/[0.06] flex items-center justify-between">
-                    <span className="text-[10px] font-mono text-zinc-400 truncate max-w-[190px]">
+                    <span className="text-[10px] font-mono text-zinc-400 truncate max-w-[210px]">
                       {targetField}
                     </span>
 
@@ -581,6 +607,56 @@ export default function SynapseDashboard() {
                 </div>
               );
             })}
+
+            {/* Bento Slot #8: Custom Anomaly Injection Interactive Card */}
+            {scenarioFilter === "ALL" && (
+              <div
+                onClick={() => setShowCustomModal(true)}
+                className="group relative text-left p-4 rounded-xl border border-dashed border-cyan-500/30 hover:border-cyan-500/60 bg-[#0E121E]/60 hover:bg-[#121728] transition-all flex flex-col justify-between cursor-pointer"
+              >
+                <div>
+                  <div className="flex items-center justify-between mb-2.5">
+                    <div className="flex items-center gap-2">
+                      <span className="h-5 w-5 rounded bg-cyan-500/10 text-cyan-300 font-mono text-[10px] font-bold flex items-center justify-center border border-cyan-500/25">
+                        +
+                      </span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded font-bold uppercase tracking-wider bg-violet-500/15 text-violet-300 border border-violet-500/25">
+                        HL7 / JSON
+                      </span>
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white/[0.04] text-zinc-400 border border-white/[0.06]">
+                        Arbitrary
+                      </span>
+                    </div>
+
+                    <span className="text-[9px] px-2 py-0.5 rounded font-mono font-bold uppercase bg-cyan-500/15 text-cyan-300 border border-cyan-500/25">
+                      Interactive
+                    </span>
+                  </div>
+
+                  <h3 className="font-semibold text-sm text-zinc-100 group-hover:text-cyan-300 transition flex items-center gap-1.5">
+                    <span>Custom Anomaly Injection</span>
+                  </h3>
+
+                  <p className="text-xs text-zinc-400 mt-1.5 leading-relaxed">
+                    Directly paste or test arbitrary malformed HL7 v2 or broken JSON webhook payloads into the live pipeline.
+                  </p>
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-white/[0.06] flex items-center justify-between">
+                  <span className="text-[10px] font-mono text-zinc-400">
+                    Press ⌘K or click to launch
+                  </span>
+
+                  <button
+                    type="button"
+                    className="px-2.5 py-1 rounded bg-cyan-500/15 group-hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/30 text-[11px] font-mono flex items-center gap-1.5 transition"
+                  >
+                    <Code2 className="h-3 w-3 text-cyan-400" />
+                    <span>Open Studio</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </section>
 
@@ -918,7 +994,7 @@ export default function SynapseDashboard() {
                 <UserCheck className="h-3.5 w-3.5" />
                 <span>Human Workflow Queue</span>
                 <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-white/[0.08] text-zinc-300 font-mono">
-                  {tasks.filter((t) => t.workflowStatus === "PENDING_APPROVAL").length}
+                  {tasks.filter((t) => t.workflowStatus === "PENDING_APPROVAL").length || status?.workflowPendingCount || 0}
                 </span>
               </button>
 
@@ -933,7 +1009,7 @@ export default function SynapseDashboard() {
                 <Database className="h-3.5 w-3.5" />
                 <span>IRIS Vector Search Runbooks</span>
                 <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-white/[0.08] text-zinc-300 font-mono">
-                  {runbooks.length}
+                  {runbooks.length || status?.runbookCount || 10}
                 </span>
               </button>
 
@@ -948,7 +1024,7 @@ export default function SynapseDashboard() {
                 <Clock className="h-3.5 w-3.5" />
                 <span>Live Audit Telemetry</span>
                 <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-white/[0.08] text-zinc-300 font-mono">
-                  {traces.length}
+                  {traces.length || status?.totalProcessed || 0}
                 </span>
               </button>
             </div>
