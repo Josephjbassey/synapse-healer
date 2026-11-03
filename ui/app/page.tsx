@@ -163,6 +163,21 @@ export default function SynapseDashboard() {
   };
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get("tab");
+      if (tabParam === "queue" || tabParam === "rag" || tabParam === "history") {
+        setActiveTab(tabParam);
+      }
+      const previewParam = params.get("preview");
+      if (previewParam) {
+        setTaskPreviewId(previewParam === "true" ? "SYN-HL7-38F0A830" : previewParam);
+      }
+      const searchParam = params.get("q");
+      if (searchParam) {
+        setRunbookSearch(searchParam);
+      }
+    }
     refreshAll();
     const interval = setInterval(refreshAll, 6000);
     return () => clearInterval(interval);
