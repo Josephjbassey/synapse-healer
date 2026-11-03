@@ -1,180 +1,70 @@
-# Turning the Dead-Letter Queue into an Autonomous Self-Healing Pipeline with InterSystems IRIS AI Hub & Vector Search
+# SynapseHealer: Building an Autonomous, Self-Healing Interoperability DLQ with InterSystems IRIS AI Hub
 
-*Published for the InterSystems Programming Contest: AI Agents in Interoperability Workflows (2026)*
+![SynapseHealer obsidian console](image_a46ca1.jpg)
 
----
+Built for the InterSystems Programming Contest: AI Agents in Interoperability Workflows (2026)
 
-## 1. The Core Idea: Escaping the "DLQ Graveyard"
+## The problem: the DLQ is a graveyard
 
-In enterprise interoperability—particularly across healthcare networks (HL7 v2 / FHIR) and supply chains (JSON webhooks)—the **Dead-Letter Queue (DLQ)** is notoriously known as the *graveyard of critical transactions*. 
+In healthcare and supply-chain integrations, the dead-letter queue is where transactions go to die. A vendor renames `client_uuid` to `customer_id` with no warning. An EHR bridge emits `1985-02-31`, an impossible calendar day. An HL7 `ADT^A01` arrives with `PV1` before `PID`. A lab note contains an unescaped pipe. The integration engine rejects the message, and it sits in the queue until an engineer opens a hex dump, decodes the schema violation, writes a one-off script, and resubmits — days later, if at all.
 
-Consider what happens in a regional hospital network:
-* A clinic's legacy EHR bridge serializes a patient date of birth as `1985-02-31` (an impossible calendar day).
-* An upstream integration engine multiplexer swaps segment sequence in an `ADT^A01` event, placing the `PV1` visit segment before the `PID` patient identification segment.
-* A laboratory instrument note contains an unescaped pipe character (`|`), causing field alignment errors.
-* A merchant gateway upgrades to API v2, renaming `client_uuid` to `customer_id` without prior notification.
+SynapseHealer replaces that manual bottleneck with an autonomous pipeline on InterSystems IRIS AI Hub: a custom inbound adapter, native vector search over repair runbooks, a governed `%AI.Agent`, and a tri-branch router that auto-heals, escalates to the InterSystems Workflow Engine, or quarantines.
 
-In conventional systems, the integration engine's parser immediately rejects these messages. They land in a dead-letter queue where they sit for days or weeks until a specialized integration engineer manually inspects the hex dump, decodes the schema violation, writes a bespoke script, and re-submits the message. Meanwhile, patient admissions are delayed, billing records stall, and clinical orders risk being dropped.
+## 1. AI Hub experience: DeadLetterHealerBP orchestrates the agent
 
-### The SynapseHealer Solution
-**SynapseHealer** transforms this manual bottleneck into an **autonomous, self-healing interoperability pipeline** powered by **InterSystems IRIS 2027.1 AI Hub**, **Native Vector Search (`%AI.RAG`)**, **Embedded Python**, and the **InterSystems Workflow Engine**:
+`Synapse.Process.DeadLetterHealerBP` is the arbitrator. `OnRequest` takes a `Synapse.Msg.DeadLetterRequest` from `ChaosIngestService`, and `ProcessDeadLetter` picks the execution mode: `live` when `SYNAPSE_MODE=live` and an API key exists, otherwise `replay` — a deterministic mode that needs zero API keys.
 
-```
-[ Inbound Malformed Payload ]
-            │
-            ▼
-[ Custom Inbound Adapter (Embedded Python) ]
-            │
-            ▼
-[ Interoperability Production: Synapse.Process.DeadLetterHealerBP ]
-            │
-            ├───> [ IRIS Vector Search: 384-dim VECTOR_COSINE ]
-            │     (Matches validated schema repair runbooks in < 45ms)
-            │
-            ├───> [ Governed %AI.Agent + HealerToolSet ]
-            │     (Executes SearchRunbookRAG -> ValidateRepairedPayload -> CalculateRiskScore)
-            │
-            └───> [ Tri-Branch Decision Router ]
-                  ├── High Confidence (>= 88%), Low Risk  --> AUTO_HEAL (Downstream Dispatch)
-                  ├── Ambiguous / Clinical Risk            --> HUMAN_WORKFLOW (IRIS Workflow Engine)
-                  └── Corrupted / Unrecoverable Schema     --> QUARANTINE (Isolated Vault)
-```
+In live mode it instantiates `Synapse.Agent.DeadLetterHealerAgent`, an `%AI.Agent` bound to `Synapse.Agent.HealerToolSet`, sends it the payload ID, source system, format, validation error, and raw body, strips any markdown fences, and parses the JSON contract: `decisionBranch`, `confidenceScore`, `riskLevel`, `matchedPatternId`, `healedPayload`, `reasoning`.
 
----
+The agent cannot improvise. Its toolset — `Synapse.Agent.HealerToolSet` (`%AI.ToolSet`) wrapping `Synapse.Agent.HealerTools` (`%AI.Tool`) — exposes exactly three governed calls: `SearchRunbookRAG`, `ValidateRepairedPayload`, and `CalculateRiskScore`. It looks up the nearest verified runbook in the 384-dimensional vector index (`VECTOR_COSINE`, sub-45ms), applies the deterministic transformation, and must pass validation before anything is resubmitted.
 
-## 2. Architectural Highlights & Key Design Decisions
+Credentials never appear in plaintext logs. `Synapse.Config.AIHubSetup.StoreWalletSecret` writes the API key into the IRIS Wallet (`%Wallet.KeyValue`, collection `SynapseSecrets`, key `SynapseSecrets.LLMKey`) at startup, and `BuildProviderSettings` references it through `@{env:LLM_API_KEY}` indirection instead of embedding the literal key. The same setup registers `%ConfigStore` and `Ens.Config.Credentials` when those classes exist, with graceful fallback on builds that lack them.
 
-### A. The Hybrid Paradigm: Never Let an LLM Guess Schemas Blindly
-One of our earliest engineering insights was that **prompting an LLM to "fix this HL7 message" from scratch is an anti-pattern for mission-critical enterprise systems**. Unconstrained LLMs frequently hallucinate trailing delimiters, miscalculate component separators, or invent patient fields.
+## 2. Models and cost control
 
-Instead, SynapseHealer implements a **Governed Hybrid Architecture**:
-1. **Deterministic Vector RAG (`Synapse.RAG.HealingRunbook`)**: The system stores validated schema mutation patterns and repair strategies indexed with native 384-dimensional vector embeddings (`VECTOR(DOUBLE, 384)`).
-2. **Sub-45ms Cosine Similarity**: Native IRIS SQL `VECTOR_COSINE` finds the nearest verified repair runbook.
-3. **Governed ToolSet Execution**: The `%AI.Agent` is restricted to calling deterministic tools (`SearchRunbookRAG`, `ValidateRepairedPayload`, `CalculateRiskScore`). It cannot alter payloads without passing strict syntax and grammar checks.
+We default to `gemini-1.5-flash` (`gpt-4o-mini` is the OpenAI alternative). Heal decisions are structural, not creative, so a fast, cheap model is the right choice.
 
-```objectscript
-/// Querying native IRIS Vector Search in ObjectScript
-Set sql = "SELECT TOP 1 PatternId, RepairStrategy, RepairRule, " _
-          "VECTOR_COSINE(Embedding, TO_VECTOR(?, DOUBLE, 384)) AS Similarity " _
-          "FROM Synapse_RAG.HealingRunbook " _
-          "ORDER BY Similarity DESC"
-Set stmt = ##class(%SQL.Statement).%New()
-Set sc = stmt.%Prepare(sql)
-Set rs = stmt.%Execute(vectorStr)
-```
+Every inference lands in `Synapse.Data.AuditTelemetry`, a persistent table storing prompt tokens, completion tokens, estimated USD cost, latency, the full tool-call trace, decision branch, risk level, and workflow status. Cost is computed from the counts — `prompt × 0.00000015 + completion × 0.0000006` — and written to the table in real time; the Next.js dashboard reads `/api/synapse/status` and shows the cumulative USD counter and auto-heal rate live.
 
-### B. Custom Inbound Adapter with Embedded Python
-Rather than using generic file or TCP adapters, we built [`Synapse.Adapter.DeadLetterInbound`](src/Synapse/Adapter/DeadLetterInbound.cls) extending `Ens.InboundAdapter`. It uses **Embedded Python** (`[ Language = python ]`) directly inside ObjectScript methods to:
-* Seamlessly tokenize raw streams without intermediate serialization overhead.
-* Synthetically generate 7 canonical enterprise failure patterns (swapped HL7 segments, escaped delimiter leaks, quoted numbers, schema key drifts) for live regression testing.
+Across our 10 regression suites: 479 prompt tokens, 176 completion tokens, $0.00018 per heal, ~145 ms end to end, 90% auto-heal rate across the seven canonical chaos scenarios. Replay mode consumes no tokens, and the telemetry table is pre-seeded with golden traces for every scenario, so the dashboard is populated from the first second.
 
-```objectscript
-Method GenerateHL7DateError() As %String [ Language = python ]
-{
-    import iris
-    import datetime
-    
-    # Generate realistic ADT^A08 with impossible calendar day for stress testing
-    now_ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-    payload = (
-        f"MSH|^~\\&|Athena_Bridge|MetroClinic|Synapse_Ingest|CentralCore|{now_ts}||ADT^A08|MSG{now_ts[-5:]}|P|2.5.1\r"
-        f"EVN|A08|{now_ts}\r"
-        f"PID|1||PAT372058^^^MRN||SMITH^JOHN^A||1985-02-31|M|||450 OAK AVE^^CAMBRIDGE^MA^02138||(617)555-4321\r"
-        f"PV1|1|O|CLINIC^EXAM2^METRO||||5678^House^Gregory^Dr|||MED|||||||REG|V14808\r"
-    )
-    return payload
-}
-```
+## 3. Observability and tracing: the three-step spine
 
-### C. Tri-Branch Decision Routing & Human-in-the-Loop (HITL)
-In healthcare, automatic mutation of a clinical field (such as a clamped date of birth or ambiguous dosage) must never proceed without clinical oversight. 
+Each heal produces a governed three-step trace, stored in `ToolTraceJSON`:
 
-When the `%AI.Agent` evaluates risk:
-* **`AUTO_HEAL`**: Pure grammatical or type fixes (e.g. re-ordering `PV1`/`PID` to match HL7 v2.5.1 specifications or stripping `$` symbols from JSON numbers) are auto-dispatched to [`Synapse.Operation.ResubmitDeliveryOp`](src/Synapse/Operation/ResubmitDeliveryOp.cls).
-* **`HUMAN_WORKFLOW`**: When risk is evaluated as `MEDIUM_HIGH`, the message is routed to [`Synapse.Operation.WorkflowEscalationOp`](src/Synapse/Operation/WorkflowEscalationOp.cls), creating a native `EnsLib.Workflow.TaskRequest` in the **InterSystems Workflow Engine**.
-* **`QUARANTINE`**: Malformed payloads with unrecoverable corruption are isolated into [`Synapse.Operation.QuarantineVaultOp`](src/Synapse/Operation/QuarantineVaultOp.cls).
+1. `SearchRunbookRAG` — error and format in, matched runbook and similarity out (~42 ms)
+2. `ValidateRepairedPayload` — strict HL7 v2 / JSON syntax and schema check (~56 ms)
+3. `CalculateRiskScore` — clinical and financial risk classification (~35 ms)
 
-### D. Secure Credential Management via the IRIS Wallet
-Hardcoding API keys in `.cpf` files or globals is a major security vulnerability. SynapseHealer implements [`Synapse.Config.AIHubSetup`](src/Synapse/Config/AIHubSetup.cls), leveraging the secure **InterSystems IRIS Wallet (`%Wallet.KeyValue`)** and `%ConfigStore`. The system reads the API key from `.env`, encrypts it into the Wallet, and wipes plaintext variables from memory.
+The trace is surfaced live in the Next.js console: a step gauge per call, side-by-side diff of the corrupted and healed payloads, and the agent's reasoning. `HUMAN_WORKFLOW` messages land in the workflow queue where an operator Approves (→ `ResubmitDeliveryOp`) or Rejects (→ `QuarantineVaultOp`) with reviewer notes. Everything is queryable via `/api/synapse/workflow/tasks` and the persistent audit ledger.
 
----
+## 4. IRIS agentic development: MCP build tooling, guardrails, %AI syntax, and IPM packaging
 
-## 3. Engineering Challenges & How We Solved Them
+We separated development-time agentic tooling from runtime governance. During development, we paired our IDE with the `iris-agentic-dev` MCP toolkit (`iris_symbols_local` for local AST verification across 150+ symbols and `objectscript-guardrails` to enforce method-scoped `Quit` rules and `$IsObject` checks before container compilation). At runtime inside the container, governance is 100% native to IRIS AI Hub—powered by an `%AI.ToolSet` of `%AI.Tool` methods rather than an external sidecar.
 
-### Challenge 1: The Docker Database Formatting `<DIRECTORY>` Bug
-**The Problem**: During container startup on early builds, recreating containers with `docker compose up` threw:
-```text
-Production AutoStart: ERROR in namespace '%SYS': <DIRECTORY>OnSystemStartup+106^%Library.EnsembleMgr.1 */usr/irissys/mgr/SYNAPSE/
-```
-**Root Cause**: In InterSystems IRIS, `Config.Databases.Create("SYNAPSE")` registers the database entry in `iris.cpf`, but does *not* format the physical `IRIS.DAT` file on disk. When the container restarted, the unformatted directory caused the auto-start routine to crash.
+The ObjectScript guardrails are the part I trust most:
 
-**The Solution**: We implemented the canonical InterSystems configuration merge pattern:
-1. Created [`merge.cpf`](merge.cpf) using declarative `[Actions]` (`CreateDatabase`, `CreateNamespace`, `Interop=1`).
-2. Updated [`Dockerfile`](Dockerfile) to invoke `iris merge IRIS /opt/irisapp/merge.cpf` during image build.
-3. Added fallback ObjectScript logic via `SYS.Database` in [`iris.script`](iris.script) to ensure `IRIS.DAT` is physically initialized and formatted if absent.
+- Every class is `ProcedureBlock`, and the business process checks `%Dictionary.CompiledClass.%ExistsId` before instantiating the agent, so a missing compile fails closed instead of guessing.
+- The agent's system prompt enforces a response contract: one JSON document with fixed fields, no prose.
+- `ValidateRepairedPayload` rejects messages that don't start with `MSH`, put `PV1` before `PID`, use non-`YYYYMMDD` dates in `PID-7`, leave unescaped pipes in `OBX`, or retain legacy keys like `client_uuid` after a v2 migration. `CalculateRiskScore` quarantines anything matching `<script`, `eval(`, `union select`, `drop table`, `--`, or `javascript:`, and escalates impossible dates like February 31 to human review.
+- We learned the container-startup `<DIRECTORY>` bug the hard way: `Config.Databases.Create` registers the database in `iris.cpf` but does not format the physical `IRIS.DAT` file, crashing auto-start on restart. The fix: a declarative `merge.cpf` (`[Actions]`: `CreateDatabase`, `CreateNamespace`, `Interop=1`) plus an `iris.script` fallback that initializes `IRIS.DAT` via `SYS.Database` when absent.
 
-### Challenge 2: Zero-Key Replay Mode for Frictionless Evaluation
-**The Problem**: Contest judges test dozens of entries. If an entry mandates an active Gemini or OpenAI API key, a misconfigured key or depleted quota immediately halts the evaluation.
+For %AI syntax, the agent resolves its provider via `AIHubSetup.GetProviderConfig` and `BuildProviderSettings`, creates `%AI.Provider`, calls `agent.CreateSession()` then `agent.Chat(session, prompt)`, and parses the result with `%DynamicObject.%FromJSON`. It compiled cleanly on the IRIS 2027.1 AI Hub EAP build.
 
-**The Solution**: We architected a dual-mode engine:
-* **Zero-Key Replay Mode** (`SYNAPSE_MODE=replay`): The default mode. Executes the complete Interoperability pipeline, vector similarity matching, tool execution timelines, and diff visualizations locally using pre-recorded golden traces without touching external APIs.
-* **Live AI Hub Mode** (`SYNAPSE_MODE=live`): Activating `LLM_API_KEY` in `.env` immediately routes prompts through live `%AI.Agent` calls.
+Packaging is automated: `module.xml` declares `<SystemRequirements Version=">=2026.3" Interoperability="enabled"/>`, and `SetupAll` — run by IPM on install — executes `Configure()` (Wallet, config store, credentials), seeds the runbooks and replay telemetry, then starts `Synapse.Production`. `zpm install synapse-healer` or `zpm load /opt/irisapp -v` gives you a running production with a seeded dashboard. The module shipped with +11 contest bonus points across the custom adapter, embedded Python, vector search, workflow engine, and IPM integration.
 
----
-
-## 4. Telemetry, Model Selection & Cost Efficiency
-
-During development and testing against the AI Hub EAP build, we instrumented granular telemetry stored in `Synapse_Data.AuditTelemetry`:
-
-| Metric | Measured Value | Notes |
-| :--- | :---: | :--- |
-| **Primary LLM** | `gemini-1.5-flash` / `gpt-4o-mini` | High-speed, cost-effective reasoning |
-| **Vector Dimension** | 384 dimensions (`VECTOR_COSINE`) | Standard lightweight embedding model |
-| **Average Prompt Tokens** | **479 tokens** | Structured prompt with tool definitions |
-| **Average Completion Tokens**| **176 tokens** | Structured JSON tool call responses |
-| **Average Latency** | **145 ms** | End-to-end triage, RAG search & validation |
-| **Average Cost per Heal** | **$0.00018 USD** | Less than 1/50th of a cent per transaction |
-| **Auto-Heal Success Rate** | **90.0%** | Across 10 regression test suites |
-
----
-
-## 5. Live UI: Obsidian Developer Console
-
-To provide judges with complete observability, we built a modern dashboard in `ui/` using **Next.js 14 (App Router)**, **TypeScript**, and **Tailwind CSS**:
-* **Executive Telemetry Deck**: Live token counters, inference costs, auto-heal rate, and Interoperability status.
-* **Symmetrical 2×4 Bento Command Grid**: 1-click execution for all 7 canonical chaos scenarios plus a custom payload injection modal (`⌘K`).
-* **Side-by-Side Unified Code Diff**: Line-numbered comparison displaying corrupted inbound lines (red) and schema-compliant repaired lines (emerald).
-* **Cognitive Trace Deck**: Visual progress gauge for `%AI.RAG` cosine similarity and the step-by-step Governed Tool Call Execution Spine.
-* **Human Workflow Queue**: Reviewer notes input and 1-click **"Approve & Dispatch"** or **"Reject to Quarantine"** actions.
-
----
-
-## 6. Contest Bonus Points Summary
-
-SynapseHealer was built from the ground up to satisfy all contest criteria and capture **+11 bonus points**:
-
-1. **Custom Inbound Adapter (+3 pts)**: [`Synapse.Adapter.DeadLetterInbound`](src/Synapse/Adapter/DeadLetterInbound.cls) extending `Ens.InboundAdapter`.
-2. **Embedded Python (+2 pts)**: Native `[ Language = python ]` methods in adapter, RAG vector computation, and formatting routines.
-3. **IRIS Vector Search (%AI.RAG) (+2 pts)**: [`Synapse.RAG.HealingRunbook`](src/Synapse/RAG/HealingRunbook.cls) with `VECTOR(DOUBLE, 384)` and SQL `VECTOR_COSINE`.
-4. **InterSystems Workflow Engine (+2 pts)**: [`Synapse.Operation.WorkflowEscalationOp`](src/Synapse/Operation/WorkflowEscalationOp.cls) generating `EnsLib.Workflow.TaskRequest`.
-5. **InterSystems Package Manager (+2 pts)**: Certified [`module.xml`](module.xml) with `<SystemRequirements Version=">=2026.3" Interoperability="enabled"/>`.
-
----
-
-## 7. Try It Live
+## Try it
 
 ```bash
-# 1. Clone repository
-git clone https://github.com/your-username/synapse-healer.git
+# Prerequisite: Load the InterSystems AI Hub EAP tarball (Build 109 or 154)
+# docker image load -i iris-community-2027.1.0AI.109.0-docker.tar.gz
+
+git clone https://github.com/josephjbassey/synapse-healer.git
 cd synapse-healer
-
-# 2. Start container (Zero-Key Replay Mode works immediately)
 docker compose up -d
-
-# 3. Launch Observability Dashboard
-cd ui
-npm install
-npm run dev
+cd ui && npm install && npm run dev
 ```
 
-Open **`http://localhost:3000`** in your browser, press keys `[1]` through `[7]` to trigger chaos payloads, and watch the pipeline heal them in real time!
+Open `http://localhost:3000`, press 1–7 to inject chaos payloads, and watch the pipeline heal them. No API key required; set `SYNAPSE_MODE=live` with an `LLM_API_KEY` for live AI Hub inference.
+
+It's not magic. It's governed tool calls, deterministic validation, and a telemetry table that actually gets read.

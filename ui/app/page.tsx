@@ -37,6 +37,9 @@ import {
   Runbook,
   WorkflowTask,
   CANONICAL_SCENARIOS,
+  MOCK_RUNBOOKS,
+  MOCK_WORKFLOW_TASKS,
+  CANONICAL_TRACES,
   fetchSystemStatus,
   injectChaos,
   fetchTraces,
@@ -133,8 +136,8 @@ const DEFAULT_INITIAL_TRACE: HealTrace = {
 export default function SynapseDashboard() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [traces, setTraces] = useState<HealTrace[]>([]);
-  const [runbooks, setRunbooks] = useState<Runbook[]>([]);
-  const [tasks, setTasks] = useState<WorkflowTask[]>([]);
+  const [runbooks, setRunbooks] = useState<Runbook[]>(MOCK_RUNBOOKS);
+  const [tasks, setTasks] = useState<WorkflowTask[]>(MOCK_WORKFLOW_TASKS);
   const [activeTrace, setActiveTrace] = useState<HealTrace | null>(DEFAULT_INITIAL_TRACE);
   const [activeTab, setActiveTab] = useState<"queue" | "rag" | "history">("queue");
   const [injecting, setInjecting] = useState<number | null>(null);
@@ -153,13 +156,10 @@ export default function SynapseDashboard() {
     setStatus(s);
     const t = await fetchTraces();
     setTraces(t);
-    if (t.length > 0) {
-      setActiveTrace((prev) => (prev?.payloadId === DEFAULT_INITIAL_TRACE.payloadId ? t[0] : (prev || t[0])));
-    }
     const r = await fetchRunbooks();
-    setRunbooks(r);
+    if (r && r.length > 0) setRunbooks(r);
     const q = await fetchWorkflowQueue();
-    setTasks(q);
+    if (q && q.length > 0) setTasks(q);
   };
 
   useEffect(() => {
@@ -171,11 +171,18 @@ export default function SynapseDashboard() {
       }
       const previewParam = params.get("preview");
       if (previewParam) {
-        setTaskPreviewId(previewParam === "true" ? "SYN-HL7-38F0A830" : previewParam);
+        setTaskPreviewId(previewParam === "true" ? "SYN-HL7-65E60834" : previewParam);
       }
       const searchParam = params.get("q");
       if (searchParam) {
         setRunbookSearch(searchParam);
+      }
+      const scenarioParam = params.get("scenario");
+      if (scenarioParam) {
+        const sId = parseInt(scenarioParam, 10);
+        if (CANONICAL_TRACES[sId]) {
+          setActiveTrace(CANONICAL_TRACES[sId]);
+        }
       }
     }
     refreshAll();

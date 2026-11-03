@@ -155,7 +155,7 @@ const MOCK_STATUS: SystemStatus = {
   avgLatencyMs: 168,
 };
 
-const MOCK_RUNBOOKS: Runbook[] = [
+export const MOCK_RUNBOOKS: Runbook[] = [
   {
     patternId: "HL7-PID-PV1-INVERSION",
     errorSignature: "Segment out of grammatical order: PV1 visit segment received prior to PID patient identification",
@@ -228,8 +228,116 @@ const MOCK_RUNBOOKS: Runbook[] = [
   },
 ];
 
+export const MOCK_WORKFLOW_TASKS: WorkflowTask[] = [
+  {
+    payloadId: "SYN-HL7-65E60834",
+    patternId: "HL7-DATE-FORMAT-INVALID",
+    timestamp: "2026-11-03 15:22:18",
+    sourceSystem: "Athena_Ambulatory_Bridge",
+    format: "HL7",
+    confidenceScore: 0.74,
+    riskLevel: "MEDIUM_HIGH",
+    workflowStatus: "PENDING_APPROVAL",
+    reasoning: "PID-7 calendar date 1985-02-31 does not exist in Gregorian calendar. Clamped to boundary candidate 19850228, but clinical risk requires Human Reviewer verification.",
+    rawPayload: "MSH|^~\\&|Athena_Bridge|MetroClinic|Synapse_Ingest|CentralCore|20261103152218||ADT^A08|MSG53336|P|2.5.1\rEVN|A08|20261103152218\rPID|1||PAT404016^^^MRN||SMITH^JOHN^A||1985-02-31|M|||450 OAK AVE^^CAMBRIDGE^MA^02138||(617)555-4321\rPV1|1|O|CLINIC^EXAM2^METRO||||5678^House^Gregory^Dr|||MED|||||||REG|V29455\r",
+    healedPayload: "MSH|^~\\&|Athena_Bridge|MetroClinic|Synapse_Ingest|CentralCore|20261103152218||ADT^A08|MSG53336|P|2.5.1\rEVN|A08|20261103152218\rPID|1||PAT404016^^^MRN||SMITH^JOHN^A||19850228|M|||450 OAK AVE^^CAMBRIDGE^MA^02138||(617)555-4321\rPV1|1|O|CLINIC^EXAM2^METRO||||5678^House^Gregory^Dr|||MED|||||||REG|V29455\r",
+  },
+  {
+    payloadId: "SYN-HL7-C2F266D5",
+    patternId: "HL7-DATE-FORMAT-INVALID",
+    timestamp: "2026-11-03 14:56:17",
+    sourceSystem: "Athena_Ambulatory_Bridge",
+    format: "HL7",
+    confidenceScore: 0.74,
+    riskLevel: "MEDIUM_HIGH",
+    workflowStatus: "APPROVED",
+    reasoning: "Reviewed and approved by clinician operator.",
+    rawPayload: "MSH|^~\\&|Athena_Bridge|MetroClinic|Synapse_Ingest|CentralCore|20261103145617||ADT^A08|MSG53330|P|2.5.1\rEVN|A08|20261103145617\rPID|1||PAT404016^^^MRN||SMITH^JOHN^A||1985-02-31|M|||450 OAK AVE^^CAMBRIDGE^MA^02138||(617)555-4321\rPV1|1|O|CLINIC^EXAM2^METRO||||5678^House^Gregory^Dr|||MED|||||||REG|V29455\r",
+    healedPayload: "MSH|^~\\&|Athena_Bridge|MetroClinic|Synapse_Ingest|CentralCore|20261103145617||ADT^A08|MSG53330|P|2.5.1\rEVN|A08|20261103145617\rPID|1||PAT404016^^^MRN||SMITH^JOHN^A||19850228|M|||450 OAK AVE^^CAMBRIDGE^MA^02138||(617)555-4321\rPV1|1|O|CLINIC^EXAM2^METRO||||5678^House^Gregory^Dr|||MED|||||||REG|V29455\r",
+    operatorNotes: "Reviewed and approved via SynapseHealer console.",
+  }
+];
+
+export const CANONICAL_TRACES: Record<number, HealTrace> = {
+  1: {
+    payloadId: "SYN-HL7-B2CA3E77",
+    timestamp: "2026-11-03 12:13:07",
+    sourceSystem: "Epic_ADT_Gateway",
+    format: "HL7",
+    validationError: "HL7 Grammatical Ordering Violation: PV1 visit segment received prior to PID patient identification segment in ADT^A01 event",
+    rawPayload: "MSH|^~\\&|Epic_ADT|RegionalHospital|Synapse_Ingest|CentralCore|20261103100057||ADT^A01|MSG16723|P|2.5.1\rEVN|A01|20261103100057\rPV1|1|I|W402^BED01^HOSP||||1234^Welby^Marcus^Dr|||SUR|||||||ADM|V88632\rPID|1||PAT627028^^^MRN||DOE^JANE^M||19820514|F|||123 ELM ST^^BOSTON^MA^02108||(617)555-0199\r",
+    healedPayload: "MSH|^~\\&|Epic_ADT|RegionalHospital|Synapse_Ingest|CentralCore|20261103100057||ADT^A01|MSG16723|P|2.5.1\rEVN|A01|20261103100057\rPID|1||PAT627028^^^MRN||DOE^JANE^M||19820514|F|||123 ELM ST^^BOSTON^MA^02108||(617)555-0199\rPV1|1|I|W402^BED01^HOSP||||1234^Welby^Marcus^Dr|||SUR|||||||ADM|V88632\r",
+    decisionBranch: "AUTO_HEAL",
+    confidenceScore: 0.96,
+    riskLevel: "LOW",
+    matchedPatternId: "HL7-PID-PV1-INVERSION",
+    agentReasoning: "Re-sequenced HL7 segments to conform with HL7 v2.5.1 grammar: MSH -> EVN -> PID -> PV1. Grammatical sequence restored and validated.",
+    toolTrace: [
+      { step: 1, tool: "SearchRunbookRAG", input: { errorSignature: "PV1 received prior to PID" }, output: { matchedPattern: "HL7-PID-PV1-INVERSION", strategy: "REORDER_SEGMENTS", similarity: 0.96 }, durationMs: 42 },
+      { step: 2, tool: "ValidateRepairedPayload", input: { format: "HL7" }, output: { valid: true, syntaxCheck: "PASSED", schemaCompliance: "100%" }, durationMs: 58 },
+      { step: 3, tool: "CalculateRiskScore", input: { patternId: "HL7-PID-PV1-INVERSION" }, output: { riskLevel: "LOW", confidence: 0.96, recommendedBranch: "AUTO_HEAL" }, durationMs: 35 },
+    ],
+    promptTokens: 462,
+    completionTokens: 184,
+    estimatedCostUSD: 0.00018,
+    latencyMs: 135,
+    executionMode: "replay",
+    workflowStatus: "NONE",
+  },
+  2: {
+    payloadId: "SYN-HL7-65E60834",
+    timestamp: "2026-11-03 15:22:18",
+    sourceSystem: "Athena_Ambulatory_Bridge",
+    format: "HL7",
+    validationError: "HL7 DataType Error: PID-7 Date/Time of Birth contains invalid date format (hyphenated or Feb 31)",
+    rawPayload: "MSH|^~\\&|Athena_Bridge|MetroClinic|Synapse_Ingest|CentralCore|20261103152218||ADT^A08|MSG53336|P|2.5.1\rEVN|A08|20261103152218\rPID|1||PAT404016^^^MRN||SMITH^JOHN^A||1985-02-31|M|||450 OAK AVE^^CAMBRIDGE^MA^02138||(617)555-4321\rPV1|1|O|CLINIC^EXAM2^METRO||||5678^House^Gregory^Dr|||MED|||||||REG|V29455\r",
+    healedPayload: "MSH|^~\\&|Athena_Bridge|MetroClinic|Synapse_Ingest|CentralCore|20261103152218||ADT^A08|MSG53336|P|2.5.1\rEVN|A08|20261103152218\rPID|1||PAT404016^^^MRN||SMITH^JOHN^A||19850228|M|||450 OAK AVE^^CAMBRIDGE^MA^02138||(617)555-4321\rPV1|1|O|CLINIC^EXAM2^METRO||||5678^House^Gregory^Dr|||MED|||||||REG|V29455\r",
+    decisionBranch: "HUMAN_WORKFLOW",
+    confidenceScore: 0.74,
+    riskLevel: "MEDIUM_HIGH",
+    matchedPatternId: "HL7-DATE-FORMAT-INVALID",
+    agentReasoning: "PID-7 calendar date 1985-02-31 does not exist in Gregorian calendar. Clamped to boundary candidate 19850228, but clinical risk requires Human Reviewer verification.",
+    toolTrace: [
+      { step: 1, tool: "SearchRunbookRAG", input: { errorSignature: "PID-7 invalid calendar date 1985-02-31" }, output: { matchedPattern: "HL7-DATE-FORMAT-INVALID", strategy: "REGEX_TRANSFORM", similarity: 0.74 }, durationMs: 42 },
+      { step: 2, tool: "ValidateRepairedPayload", input: { format: "HL7" }, output: { valid: true, syntaxCheck: "PASSED", schemaCompliance: "100%" }, durationMs: 58 },
+      { step: 3, tool: "CalculateRiskScore", input: { patternId: "HL7-DATE-FORMAT-INVALID" }, output: { riskLevel: "MEDIUM_HIGH", confidence: 0.74, recommendedBranch: "HUMAN_WORKFLOW" }, durationMs: 35 },
+    ],
+    promptTokens: 498,
+    completionTokens: 192,
+    estimatedCostUSD: 0.00019,
+    latencyMs: 145,
+    executionMode: "replay",
+    workflowStatus: "PENDING_APPROVAL",
+  },
+  4: {
+    payloadId: "SYN-JSON-A94E21D0",
+    timestamp: "2026-11-03 15:24:00",
+    sourceSystem: "Shopify_Medical_Store",
+    format: "JSON",
+    validationError: "JSON Schema Type Error: Properties expected numeric types but received quoted strings with currency symbols",
+    rawPayload: "{\n  \"order_id\": \"ORD-99201\",\n  \"customer_id\": \"CUST-4412\",\n  \"total_amount\": \"$450.00\",\n  \"tax_rate\": \"0.0825\",\n  \"is_rush\": \"true\",\n  \"line_items\": [\n    {\n      \"sku\": \"MED-SYR-50\",\n      \"unit_price\": \"$15.50\",\n      \"quantity\": \"20\"\n    }\n  ]\n}",
+    healedPayload: "{\n  \"order_id\": \"ORD-99201\",\n  \"customer_id\": \"CUST-4412\",\n  \"total_amount\": 450.00,\n  \"tax_rate\": 0.0825,\n  \"is_rush\": true,\n  \"line_items\": [\n    {\n      \"sku\": \"MED-SYR-50\",\n      \"unit_price\": 15.50,\n      \"quantity\": 20\n    }\n  ]\n}",
+    decisionBranch: "AUTO_HEAL",
+    confidenceScore: 0.98,
+    riskLevel: "LOW",
+    matchedPatternId: "JSON-STRINGIFIED-NUMBERS",
+    agentReasoning: "Stripped currency symbol '$' and cast stringified numeric values to native floats/integers. Cast string 'true' to boolean.",
+    toolTrace: [
+      { step: 1, tool: "SearchRunbookRAG", input: { errorSignature: "Quoted numbers with currency symbols" }, output: { matchedPattern: "JSON-STRINGIFIED-NUMBERS", strategy: "CAST_NUMERIC_AND_BOOLEAN", similarity: 0.95 }, durationMs: 39 },
+      { step: 2, tool: "ValidateRepairedPayload", input: { format: "JSON" }, output: { valid: true, syntaxCheck: "PASSED", schemaCompliance: "100%" }, durationMs: 51 },
+      { step: 3, tool: "CalculateRiskScore", input: { patternId: "JSON-STRINGIFIED-NUMBERS" }, output: { riskLevel: "LOW", confidence: 0.98, recommendedBranch: "AUTO_HEAL" }, durationMs: 31 },
+    ],
+    promptTokens: 440,
+    completionTokens: 165,
+    estimatedCostUSD: 0.00017,
+    latencyMs: 121,
+    executionMode: "replay",
+    workflowStatus: "NONE",
+  }
+};
+
 let localTraces: HealTrace[] = [];
-let localTasks: WorkflowTask[] = [];
+let localTasks: WorkflowTask[] = [...MOCK_WORKFLOW_TASKS];
 
 export async function fetchSystemStatus(): Promise<SystemStatus> {
   try {
