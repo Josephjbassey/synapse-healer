@@ -89,10 +89,14 @@ ClassMethod IngestChaos(pFormat As %String = "JSON", pErrorType As %String = "AU
         }
     }
 
-    // 2. Standalone fallback: process directly through service instance
+    // 2. Standalone fallback: execute healing pipeline directly and record telemetry
     Set standaloneSvc = ..%New()
     Set standaloneSvc.StoreAuditLog = 1
-    Set tSC = standaloneSvc.OnProcessInput(req)
+    Do standaloneSvc.RecordAuditLog(req)
+
+    // Execute business process healing arbitration and record telemetry
+    Set bp = ##class(Synapse.Process.DeadLetterHealerBP).%New()
+    Set tSC = bp.OnRequest(req, .resp)
 
     Quit tSC
 }
