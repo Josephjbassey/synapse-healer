@@ -4,6 +4,11 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "SynapseHealer | Autonomous Dead-Letter & Schema Healer",
   description: "Enterprise Interoperability DLQ Autonomous Healer on InterSystems IRIS 2027.1 AI Hub",
+  icons: {
+    icon: "/icon.svg",
+    shortcut: "/icon.svg",
+    apple: "/icon.svg",
+  },
 };
 
 export default function RootLayout({

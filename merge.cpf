@@ -1,0 +1,9 @@
+[Actions]
+ModifyService:Name=%Service_CallIn,Enabled=1,AutheEnabled=48
+ModifyService:Name=%Service_Bindings,Enabled=1
+CreateResource:Name=%DB_SYNAPSE,Description="SYNAPSE Database Resource"
+CreateDatabase:Name=SYNAPSE,Directory=/usr/irissys/mgr/SYNAPSE,Resource=%DB_SYNAPSE
+CreateNamespace:Name=SYNAPSE,Globals=SYNAPSE,Routines=SYNAPSE,Interop=1
+
+[Startup]
+SystemMode=AI Hub EAP

@@ -16,8 +16,25 @@ do ##class(Security.Services).Get("%Service_Bindings",.bindProps)
 set bindProps("Enabled") = 1
 do ##class(Security.Services).Modify("%Service_Bindings",.bindProps)
 
-; 4. Create SYNAPSE database and namespace if not already present
-if '##class(Config.Namespaces).Exists("SYNAPSE") { set dbDir = "/usr/irissys/mgr/SYNAPSE" if '##class(%File).DirectoryExists(dbDir) { do ##class(%File).CreateDirectoryChain(dbDir) } kill dbProps set dbProps("Directory") = dbDir do ##class(Config.Databases).Create("SYNAPSE", .dbProps) kill nsProps set nsProps("Globals") = "SYNAPSE" set nsProps("Routines") = "SYNAPSE" do ##class(Config.Namespaces).Create("SYNAPSE", .nsProps) }
+; 4. Ensure SYNAPSE physical database, configuration, and namespace exist
+set dbDir = "/usr/irissys/mgr/SYNAPSE"
+if '##class(%File).DirectoryExists(dbDir) do ##class(%File).CreateDirectoryChain(dbDir)
+if '##class(%File).Exists(dbDir_"/IRIS.DAT") {
+    set db = ##class(SYS.Database).%New()
+    set db.Directory = dbDir
+    do db.%Save()
+}
+if '##class(Config.Databases).Exists("SYNAPSE") {
+    kill dbProps
+    set dbProps("Directory") = dbDir
+    do ##class(Config.Databases).Create("SYNAPSE", .dbProps)
+}
+if '##class(Config.Namespaces).Exists("SYNAPSE") {
+    kill nsProps
+    set nsProps("Globals") = "SYNAPSE"
+    set nsProps("Routines") = "SYNAPSE"
+    do ##class(Config.Namespaces).Create("SYNAPSE", .nsProps)
+}
 
 ; 5. Enable Interoperability on SYNAPSE
 do ##class(%EnsembleMgr).EnableNamespace("SYNAPSE", 1)
