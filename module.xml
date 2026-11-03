@@ -8,6 +8,7 @@
       <Packaging>module</Packaging>
       <SourcesRoot>src</SourcesRoot>
       <Resource Name="Synapse.PKG"/>
+      <Invoke Method="SetupAll" Class="Synapse.Config.AIHubSetup"/>
       <SystemRequirements Version=">=2026.3" Interoperability="enabled"/>
     </Module>
   </Document>

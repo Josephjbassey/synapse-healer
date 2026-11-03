@@ -144,9 +144,8 @@ ClassMethod InjectChaos() As %Status
         Return $$$OK
     }
 
-    // Execute through Business Process
-    Set bp = ##class(Synapse.Process.DeadLetterHealerBP).%New()
-    Set sc = bp.OnRequest(req, .resp)
+    // Execute through Business Process Triage Arbitrator
+    Set sc = ##class(Synapse.Process.DeadLetterHealerBP).ProcessDeadLetter(req, .resp)
 
     If $$$ISERR(sc) || '$IsObject(resp) {
         Set err = {"ok": false, "error": ($System.Status.GetErrorText(sc))}

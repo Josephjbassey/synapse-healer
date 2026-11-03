@@ -22,6 +22,17 @@ Property QuarantineTarget As %String(MAXLEN = 100) [ InitialExpression = "Synaps
 /// Main process handler receiving DeadLetterRequest from ChaosIngestService
 Method OnRequest(pRequest As Synapse.Msg.DeadLetterRequest, Output pResponse As Synapse.Msg.HealResponse) As %Status
 {
+    Set sc = ..ProcessDeadLetter(pRequest, .pResponse, ..ExecutionMode)
+    If $$$ISOK(sc) && $IsObject(pResponse) && (..%SessionId '= "") {
+        Set targetOp = $Select(pResponse.DecisionBranch="HUMAN_WORKFLOW":..WorkflowTarget, pResponse.DecisionBranch="QUARANTINE":..QuarantineTarget, 1:..AutoHealTarget)
+        If targetOp '= "" Do ..SendRequestAsync(targetOp, pResponse)
+    }
+    Quit sc
+}
+
+/// Static triage and healing arbitrator callable directly by REST API or unit tests
+ClassMethod ProcessDeadLetter(pRequest As Synapse.Msg.DeadLetterRequest, Output pResponse As Synapse.Msg.HealResponse, pExecutionMode As %String = "auto") As %Status
+{
     Set tSC = $$$OK
 
     If '$IsObject(pRequest) Return $$$ERROR($$$GeneralError, "Null DeadLetterRequest")
@@ -30,7 +41,7 @@ Method OnRequest(pRequest As Synapse.Msg.DeadLetterRequest, Output pResponse As 
     Set pResponse.PayloadId = pRequest.PayloadId
 
     // 1. Resolve effective execution mode
-    Set effMode = ..ExecutionMode
+    Set effMode = pExecutionMode
     If effMode = "auto" {
         Set envMode = $System.Util.GetEnviron("SYNAPSE_MODE")
         Do ##class(Synapse.Config.AIHubSetup).GetProviderConfig(.prov, .key, .mdl, .url)
@@ -44,11 +55,9 @@ Method OnRequest(pRequest As Synapse.Msg.DeadLetterRequest, Output pResponse As 
     // 2. Execute Healing (Live Agent or Deterministic Replay)
     Set executedLive = 0
     If effMode = "live" {
-        Set scLive = ..ExecuteLiveAgent(pRequest, .pResponse)
+        Set scLive = ..ExecuteLiveAgentStatic(pRequest, .pResponse)
         If $$$ISOK(scLive) {
             Set executedLive = 1
-        } Else {
-            $$$LOGWARNING("Live agent invocation failed; falling back to deterministic replay: " _ $System.Status.GetErrorText(scLive))
         }
     }
 
@@ -59,34 +68,26 @@ Method OnRequest(pRequest As Synapse.Msg.DeadLetterRequest, Output pResponse As 
 
     // 3. Determine Routing Branch & Target Operation
     Set branch = pResponse.DecisionBranch
-    Set targetOp = ..AutoHealTarget
+    Set targetOp = "Synapse.Operation.ResubmitDeliveryOp"
     Set wfStatus = "NONE"
 
     If branch = "HUMAN_WORKFLOW" {
-        Set targetOp = ..WorkflowTarget
+        Set targetOp = "Synapse.Operation.WorkflowEscalationOp"
         Set wfStatus = "PENDING_APPROVAL"
     } ElseIf branch = "QUARANTINE" {
-        Set targetOp = ..QuarantineTarget
+        Set targetOp = "Synapse.Operation.QuarantineVaultOp"
     } Else {
-        Set targetOp = ..AutoHealTarget
+        Set targetOp = "Synapse.Operation.ResubmitDeliveryOp"
     }
 
-    // 4. Dispatch to Destination Operation
-    If targetOp '= "" {
-        Set scSend = ..SendRequestAsync(targetOp, pResponse)
-        If $$$ISERR(scSend) {
-            $$$LOGWARNING("Unable to deliver HealResponse to target '" _ targetOp _ "': " _ $System.Status.GetErrorText(scSend))
-        }
-    }
-
-    // 5. Persist Audit Telemetry
+    // 4. Persist Audit Telemetry
     Do ##class(Synapse.Data.AuditTelemetry).RecordTelemetry(pRequest, pResponse, targetOp, wfStatus)
 
     Quit $$$OK
 }
 
 /// Invokes the live %AI.Agent inside IRIS AI Hub
-Method ExecuteLiveAgent(pRequest As Synapse.Msg.DeadLetterRequest, Output pResponse As Synapse.Msg.HealResponse) As %Status
+ClassMethod ExecuteLiveAgentStatic(pRequest As Synapse.Msg.DeadLetterRequest, Output pResponse As Synapse.Msg.HealResponse) As %Status
 {
     Set tSC = $$$OK
 

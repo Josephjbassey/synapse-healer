@@ -97,7 +97,7 @@ Method ProcessInboundDirectory(Output pProcessedAny As %Boolean) As %Status
 }
 
 /// Creates a Synapse.Msg.DeadLetterRequest populated by Embedded Python realistic chaos generation
-Method CreateDeadLetterFromChaos(pFormat As %String = "", pErrorType As %String = "AUTO") As Synapse.Msg.DeadLetterRequest
+ClassMethod CreateDeadLetterFromChaos(pFormat As %String = "", pErrorType As %String = "AUTO") As Synapse.Msg.DeadLetterRequest
 {
     Set jsonStr = ..GenerateChaosPayloadJSON(pFormat, pErrorType)
     If jsonStr = "" Quit $$$NULLOREF

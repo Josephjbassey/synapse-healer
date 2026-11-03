@@ -77,10 +77,23 @@ ClassMethod Approve(pPayloadId As %String, pOperatorNote As %String = "") As %St
     Set tSC = $$$OK
 
     If pPayloadId = "" Return $$$ERROR($$$GeneralError, "PayloadId required")
-    If '$Data(^Synapse.WorkflowQueue("tasks", pPayloadId)) Return $$$ERROR($$$GeneralError, "Task not found in queue")
+    
+    Set taskData = ""
+    Set healedStr = ""
+    If $Data(^Synapse.WorkflowQueue("tasks", pPayloadId)) {
+        Set taskData = $Get(^Synapse.WorkflowQueue("tasks", pPayloadId))
+        Set healedStr = $Get(^Synapse.WorkflowQueue("healed", pPayloadId))
+    }
+    
+    If taskData = "" {
+        &sql(SELECT MatchedPatternId, ConfidenceScore, RiskLevel, HealedPayloadSummary 
+             INTO :pat, :conf, :risk, :hld 
+             FROM Synapse_Data.AuditTelemetry WHERE PayloadId = :pPayloadId)
+        If SQLCODE '= 0 Return $$$ERROR($$$GeneralError, "Task not found in queue")
+        Set taskData = $ListBuild(pat, conf, risk, $ZDateTime($Horolog, 3), "PENDING")
+        Set healedStr = hld
+    }
 
-    Set taskData = $Get(^Synapse.WorkflowQueue("tasks", pPayloadId))
-    Set healedStr = $Get(^Synapse.WorkflowQueue("healed", pPayloadId))
     Set patternId = $ListGet(taskData, 1)
     Set confidence = $ListGet(taskData, 2)
     Set risk = $ListGet(taskData, 3)
@@ -103,9 +116,7 @@ ClassMethod Approve(pPayloadId As %String, pOperatorNote As %String = "") As %St
     Set resp.RiskLevel = risk
     Do resp.SetHealedFromString(healedStr)
 
-    Set delivOp = ##class(Synapse.Operation.ResubmitDeliveryOp).%New()
-    Set tSC = delivOp.ResubmitPayload(resp)
-
+    Set tSC = ##class(Synapse.Operation.ResubmitDeliveryOp).Resubmit(resp)
     Quit tSC
 }
 
@@ -115,9 +126,18 @@ ClassMethod Reject(pPayloadId As %String, pOperatorNote As %String = "") As %Sta
     Set tSC = $$$OK
 
     If pPayloadId = "" Return $$$ERROR($$$GeneralError, "PayloadId required")
-    If '$Data(^Synapse.WorkflowQueue("tasks", pPayloadId)) Return $$$ERROR($$$GeneralError, "Task not found in queue")
+    
+    Set taskData = ""
+    If $Data(^Synapse.WorkflowQueue("tasks", pPayloadId)) {
+        Set taskData = $Get(^Synapse.WorkflowQueue("tasks", pPayloadId))
+    }
+    
+    If taskData = "" {
+        &sql(SELECT MatchedPatternId INTO :pat FROM Synapse_Data.AuditTelemetry WHERE PayloadId = :pPayloadId)
+        If SQLCODE '= 0 Return $$$ERROR($$$GeneralError, "Task not found in queue")
+        Set taskData = $ListBuild(pat, 0.0, "HIGH", $ZDateTime($Horolog, 3), "PENDING")
+    }
 
-    Set taskData = $Get(^Synapse.WorkflowQueue("tasks", pPayloadId))
     Set patternId = $ListGet(taskData, 1)
 
     // Update workflow queue status
@@ -136,9 +156,7 @@ ClassMethod Reject(pPayloadId As %String, pOperatorNote As %String = "") As %Sta
     Set resp.MatchedPatternId = patternId
     Set resp.AgentReasoning = "Rejected by human reviewer: " _ pOperatorNote
 
-    Set qOp = ##class(Synapse.Operation.QuarantineVaultOp).%New()
-    Set tSC = qOp.QuarantinePayload(resp)
-
+    Set tSC = ##class(Synapse.Operation.QuarantineVaultOp).Quarantine(resp)
     Quit tSC
 }
 

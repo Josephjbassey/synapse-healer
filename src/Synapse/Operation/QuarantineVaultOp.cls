@@ -70,7 +70,9 @@ Method IsolatePayload(pPayloadId As %String, pPayloadContent As %String, pReason
         Set ^Synapse.Quarantine("history", +$Horolog, pPayloadId) = $Piece($Horolog, ",", 2)
     }
 
-    $$$LOGWARNING("Payload " _ pPayloadId _ " quarantined into vault: " _ pReason)
+    If ..%SessionId '= "" {
+        $$$LOGWARNING("Payload " _ pPayloadId _ " quarantined into vault: " _ pReason)
+    }
 
     Quit $$$OK
 }
@@ -78,7 +80,46 @@ Method IsolatePayload(pPayloadId As %String, pPayloadContent As %String, pReason
 /// Standalone helper for direct invocation
 Method QuarantinePayload(pRequest As Synapse.Msg.HealResponse) As %Status
 {
-    Quit ..QuarantineFromResponse(pRequest, .dummy)
+    Set dir = ..QuarantineDir
+    If dir = "" Set dir = "/tmp/synapse/quarantine"
+    Quit ..Quarantine(pRequest, dir)
+}
+
+/// Standalone quarantine executor callable statically or outside actor threads
+ClassMethod Quarantine(pRequest As Synapse.Msg.HealResponse, pDir As %String = "/tmp/synapse/quarantine") As %Status
+{
+    Set tSC = $$$OK
+
+    If '$IsObject(pRequest) Return $$$ERROR($$$GeneralError, "Null HealResponse")
+    Set payloadId = pRequest.PayloadId
+    If payloadId = "" Return $$$ERROR($$$GeneralError, "PayloadId required")
+
+    Set payload = pRequest.GetHealedAsString()
+    If payload = "" Set payload = pRequest.AgentReasoning
+    Set reason = pRequest.AgentReasoning
+    Set riskLevel = pRequest.RiskLevel
+    Set patternId = pRequest.MatchedPatternId
+
+    If pDir '= "" {
+        If '##class(%File).DirectoryExists(pDir) {
+            Do ##class(%File).CreateDirectoryChain(pDir)
+        }
+        Set filename = payloadId _ "_quarantine.dat"
+        Set fullPath = ##class(%File).NormalizeFilename(filename, pDir)
+
+        Set file = ##class(%Stream.FileCharacter).%New()
+        Set sc = file.LinkToFile(fullPath)
+        If $$$ISOK(sc) {
+            Do file.Write(payload)
+            Do file.%Save()
+        }
+    }
+
+    Set ^Synapse.Quarantine("index", payloadId) = $ListBuild(patternId, riskLevel, $ZDateTime($Horolog, 3), reason)
+    Set ^Synapse.Quarantine("payload", payloadId) = payload
+    Set ^Synapse.Quarantine("history", +$Horolog, payloadId) = $Piece($Horolog, ",", 2)
+
+    Quit $$$OK
 }
 
 }

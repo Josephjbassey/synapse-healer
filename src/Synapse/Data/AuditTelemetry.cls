@@ -107,6 +107,12 @@ ClassMethod RecordTelemetry(pReq As Synapse.Msg.DeadLetterRequest, pResp As Syna
     Set telem.WorkflowStatus = pWorkflowStatus
     Set telem.ExecutionMode = pResp.ExecutionMode
 
+    If pWorkflowStatus = "PENDING_APPROVAL" {
+        Set ^Synapse.WorkflowQueue("tasks", payloadId) = $ListBuild(pResp.MatchedPatternId, pResp.ConfidenceScore, pResp.RiskLevel, $ZDateTime($Horolog, 3), "PENDING")
+        Set ^Synapse.WorkflowQueue("healed", payloadId) = pResp.GetHealedAsString()
+        Set ^Synapse.WorkflowQueue("reasoning", payloadId) = pResp.AgentReasoning
+    }
+
     Set tSC = telem.%Save()
     Quit tSC
 }

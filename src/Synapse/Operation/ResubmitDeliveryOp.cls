@@ -27,6 +27,18 @@ XData MessageMap
 /// Delivers the healed payload to the destination directory and audit index
 Method ResubmitPayload(pRequest As Synapse.Msg.HealResponse, Output pResponse As Ens.Response) As %Status
 {
+    Set dir = ..DeliveryDir
+    If dir = "" Set dir = "/tmp/synapse/delivered"
+    Set sc = ..Resubmit(pRequest, dir)
+    If $$$ISOK(sc) && (..%SessionId '= "") {
+        $$$LOGINFO("Successfully resubmitted healed payload " _ pRequest.PayloadId _ " [" _ pRequest.MatchedPatternId _ "] to downstream endpoint")
+    }
+    Quit sc
+}
+
+/// Standalone resubmit executor callable statically or outside actor threads
+ClassMethod Resubmit(pRequest As Synapse.Msg.HealResponse, pDir As %String = "/tmp/synapse/delivered") As %Status
+{
     Set tSC = $$$OK
 
     If '$IsObject(pRequest) Return $$$ERROR($$$GeneralError, "Null HealResponse message")
@@ -35,13 +47,13 @@ Method ResubmitPayload(pRequest As Synapse.Msg.HealResponse, Output pResponse As
     Set healedContent = pRequest.GetHealedAsString()
 
     // 1. Write file to destination directory if configured
-    If ..DeliveryDir '= "" {
-        If '##class(%File).DirectoryExists(..DeliveryDir) {
-            Do ##class(%File).CreateDirectoryChain(..DeliveryDir)
+    If pDir '= "" {
+        If '##class(%File).DirectoryExists(pDir) {
+            Do ##class(%File).CreateDirectoryChain(pDir)
         }
         Set ext = $Select(healedContent [ "MSH":"hl7", 1:"json")
         Set filename = payloadId _ "_healed." _ ext
-        Set fullPath = ##class(%File).NormalizeFilename(filename, ..DeliveryDir)
+        Set fullPath = ##class(%File).NormalizeFilename(filename, pDir)
 
         Set file = ##class(%Stream.FileCharacter).%New()
         Set sc = file.LinkToFile(fullPath)
@@ -52,13 +64,9 @@ Method ResubmitPayload(pRequest As Synapse.Msg.HealResponse, Output pResponse As
     }
 
     // 2. Record delivery receipt in global
-    If ..StoreConfirmation {
-        Set ^Synapse.Delivered("index", payloadId) = $ListBuild(pRequest.MatchedPatternId, pRequest.ConfidenceScore, pRequest.RiskLevel, $ZDateTime($Horolog, 3))
-        Set ^Synapse.Delivered("payload", payloadId) = healedContent
-        Set ^Synapse.Delivered("history", +$Horolog, payloadId) = $Piece($Horolog, ",", 2)
-    }
-
-    $$$LOGINFO("Successfully resubmitted healed payload " _ payloadId _ " [" _ pRequest.MatchedPatternId _ "] to downstream endpoint")
+    Set ^Synapse.Delivered("index", payloadId) = $ListBuild(pRequest.MatchedPatternId, pRequest.ConfidenceScore, pRequest.RiskLevel, $ZDateTime($Horolog, 3))
+    Set ^Synapse.Delivered("payload", payloadId) = healedContent
+    Set ^Synapse.Delivered("history", +$Horolog, payloadId) = $Piece($Horolog, ",", 2)
 
     Quit $$$OK
 }

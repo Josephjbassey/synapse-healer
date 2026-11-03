@@ -41,6 +41,23 @@ ClassMethod Configure() As %Status
     Quit tSC
 }
 
+/// Comprehensive installer method invoked by IPM/ZPM or container bootstrap
+ClassMethod SetupAll() As %Status
+{
+    Set sc = ..Configure()
+    Do ##class(Synapse.RAG.SchemaKnowledgeBase).SeedRunbooks()
+    Do ##class(Synapse.Data.AuditTelemetry).SeedReplayTelemetry()
+    Try {
+        If ##class(%Dictionary.CompiledClass).%ExistsId("Ens.Director") {
+            If '##class(Ens.Director).IsProductionRunning() {
+                Do ##class(Ens.Director).SetAutoStart("Synapse.Production")
+                Do ##class(Ens.Director).StartProduction("Synapse.Production")
+            }
+        }
+    } Catch ex {}
+    Return $$$OK
+}
+
 /// Resolves active LLM Provider configuration from environment or secure storage
 ClassMethod GetProviderConfig(Output pProvider As %String, Output pApiKey As %String, Output pModel As %String, Output pBaseURL As %String) As %Status
 {
