@@ -23,6 +23,14 @@ In enterprise healthcare and commerce, the **Dead-Letter Queue (DLQ)** is notori
 
 ---
 
+### 🎥 Live Video Walkthrough & Interactive Demo
+
+![SynapseHealer Live Walkthrough](docs/demo/synapse-healer-demo.gif)
+
+> 📹 **Watch Full HD Video**: [`docs/demo/synapse-healer-walkthrough.mp4`](docs/demo/synapse-healer-walkthrough.mp4) (1080p 25fps) showing real-time chaos injection, automatic HL7 segment re-ordering, JSON type coercion, and Human Workflow task approval.
+
+---
+
 ## 🏆 Contest Scorecard & Bonus Points
 
 SynapseHealer was architected specifically to maximize all technical criteria and bonus opportunities of the **AI Agents in Interoperability Workflows** programming contest:
