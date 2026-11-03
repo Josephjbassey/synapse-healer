@@ -25,25 +25,29 @@ do ##class(%EnsembleMgr).EnableNamespace("SYNAPSE", 1)
 ; 6. Enable Interoperability on IRISAPP if present
 if ##class(%SYS.Namespace).Exists("IRISAPP") do ##class(%EnsembleMgr).EnableNamespace("IRISAPP", 1)
 
-; 7. Switch to SYNAPSE namespace
+; 7. Setup /api/synapse REST Web Application
+set restApp = "/api/synapse"
+if '##class(Security.Applications).Exists(restApp) { kill appProps set appProps("AutheEnabled") = 96 set appProps("NameSpace") = "SYNAPSE" set appProps("DispatchClass") = "Synapse.REST.Dispatch" set appProps("MatchRoles") = ":%All" set appProps("Enabled") = 1 set appProps("IsNameSpaceDefault") = 0 set appProps("Recurse") = 1 do ##class(Security.Applications).Create(restApp, .appProps) } else { kill appProps do ##class(Security.Applications).Get(restApp, .appProps) set appProps("DispatchClass") = "Synapse.REST.Dispatch" set appProps("NameSpace") = "SYNAPSE" set appProps("AutheEnabled") = 96 set appProps("Enabled") = 1 set appProps("MatchRoles") = ":%All" do ##class(Security.Applications).Modify(restApp, .appProps) }
+
+; 8. Switch to SYNAPSE namespace
 zn "SYNAPSE"
 
-; 8. Load and compile SynapseHealer source code
+; 9. Load and compile SynapseHealer source code
 if ##class(%File).DirectoryExists("/opt/irisapp/src") do $system.OBJ.LoadDir("/opt/irisapp/src", "ck", .err, 1)
 
-; 9. If module.xml exists and ZPM is available, load via package manager
+; 10. If module.xml exists and ZPM is available, load via package manager
 if ##class(%File).Exists("/opt/irisapp/module.xml") && $data(^|"%SYS"|SYS("ZPM")) zpm "load /opt/irisapp/ -v":1:1
 
-; 10. Seed Knowledge Base Runbooks, baseline Telemetry, and configure AI Hub
+; 11. Seed Knowledge Base Runbooks, baseline Telemetry, and configure AI Hub
 do ##class(Synapse.Config.AIHubSetup).Configure()
 do ##class(Synapse.RAG.SchemaKnowledgeBase).SeedRunbooks()
 do ##class(Synapse.Data.AuditTelemetry).SeedReplayTelemetry()
 
-; 11. Auto-start the Synapse Interoperability Production
+; 12. Auto-start the Synapse Interoperability Production
 do ##class(Ens.Director).SetAutoStart("Synapse.Production")
 do ##class(Ens.Director).StartProduction("Synapse.Production")
 
-; 12. Also load and initialize in IRISAPP for judge compatibility if present
+; 13. Also load and initialize in IRISAPP for judge compatibility if present
 if ##class(%SYS.Namespace).Exists("IRISAPP") { zn "IRISAPP" if ##class(%File).DirectoryExists("/opt/irisapp/src") do $system.OBJ.LoadDir("/opt/irisapp/src", "ck", .err2, 1) do ##class(Synapse.Config.AIHubSetup).Configure() do ##class(Synapse.RAG.SchemaKnowledgeBase).SeedRunbooks() do ##class(Synapse.Data.AuditTelemetry).SeedReplayTelemetry() }
 
 zn "SYNAPSE"
