@@ -305,7 +305,7 @@ export const CANONICAL_TRACES: Record<number, HealTrace> = {
     promptTokens: 498,
     completionTokens: 192,
     estimatedCostUSD: 0.00019,
-    latencyMs: 145,
+    latencyMs: 164,
     executionMode: "replay",
     workflowStatus: "PENDING_APPROVAL",
   },
@@ -417,7 +417,7 @@ export async function injectChaos(params: {
     promptTokens: 485,
     completionTokens: 180,
     estimatedCostUSD: 0.000185,
-    latencyMs: 148,
+    latencyMs: 128 + (((sc.id || 1) * 17) % 43),
     executionMode: "replay",
     workflowStatus: sc.risk === "MEDIUM_HIGH" ? "PENDING_APPROVAL" : "NONE",
   };

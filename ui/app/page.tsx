@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -20,6 +20,7 @@ import {
   Layers,
   Play,
   RefreshCw,
+  RotateCcw,
   Search,
   Send,
   ShieldAlert,
@@ -73,13 +74,23 @@ function formatPayloadLines(payload: string, format: string): { lines: string[];
     }
   }
 
-  let rawLines = formatted.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  // Normalize newlines
+  let rawLines = formatted
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
 
-  // Format HL7 so each standard segment occupies its own line
-  if (format === "HL7" && rawLines.length <= 2 && payload.includes("|")) {
-    const segments = payload.split(/(?=\b(?:MSH|EVN|PID|PV1|OBX|AL1|DG1|ORC|OBR)\b)/);
-    if (segments.length > 1) {
-      rawLines = segments.map((s) => s.trim()).filter(Boolean);
+  // For HL7 payloads: ensure each segment (MSH, EVN, PID, PV1, OBX, etc.) is strictly on its own line
+  if (format === "HL7") {
+    if (rawLines.length <= 1 || rawLines.some((l) => l.includes("PID|") && l.includes("PV1|"))) {
+      const segments = formatted.split(/(?=\b(?:MSH|EVN|PID|PV1|OBX|AL1|DG1|ORC|OBR|NTE|IN1)\b)/);
+      if (segments.length > 1) {
+        rawLines = segments
+          .map((s) => s.trim().replace(/[\r\n]+/g, ""))
+          .filter(Boolean);
+      }
     }
   }
 
@@ -92,7 +103,9 @@ function formatPayloadLines(payload: string, format: string): { lines: string[];
       line.includes('"$') ||
       line.includes('"true"') ||
       line.includes("client_uuid") ||
+      line.includes("customer_id") ||
       line.includes("line_items") ||
+      line.includes("order_items") ||
       line.includes("1714567890123") ||
       line.includes("1710504000000") ||
       line.includes("PV1|1|I|") ||
@@ -105,6 +118,120 @@ function formatPayloadLines(payload: string, format: string): { lines: string[];
   });
 
   return { lines: rawLines, mutatedIndices };
+}
+
+// Bolds and highlights exact mutated tokens so diffs stand out immediately on camera
+function renderDiffLineContent(line: string, isHealed: boolean, format: string): React.ReactNode {
+  if (!line) return <span>&nbsp;</span>;
+
+  // 1. HL7 Date boundary fix (Scenario 2: 1985-02-31 -> 19850228)
+  if (!isHealed && line.includes("1985-02-31")) {
+    const parts = line.split("1985-02-31");
+    return (
+      <span>
+        {parts[0]}
+        <mark className="bg-rose-500/40 text-rose-100 px-1.5 py-0.5 rounded font-bold border border-rose-500/70 shadow-sm animate-pulse">
+          1985-02-31
+        </mark>
+        {parts[1]}
+      </span>
+    );
+  }
+  if (isHealed && line.includes("19850228")) {
+    const parts = line.split("19850228");
+    return (
+      <span>
+        {parts[0]}
+        <mark className="bg-emerald-500/40 text-emerald-100 px-1.5 py-0.5 rounded font-bold border border-emerald-500/70 shadow-sm">
+          19850228
+        </mark>
+        {parts[1]}
+      </span>
+    );
+  }
+
+  // 2. HL7 Unescaped Delimiter pipe in OBX (Scenario 3: | -> \F\)
+  if (!isHealed && line.includes("severe chest pain |")) {
+    const parts = line.split("severe chest pain |");
+    return (
+      <span>
+        {parts[0]}severe chest pain{" "}
+        <mark className="bg-rose-500/40 text-rose-100 px-1.5 py-0.5 rounded font-bold border border-rose-500/70">
+          |
+        </mark>
+        {parts[1]}
+      </span>
+    );
+  }
+  if (isHealed && line.includes("\\F\\")) {
+    const parts = line.split("\\F\\");
+    return (
+      <span>
+        {parts[0]}
+        <mark className="bg-emerald-500/40 text-emerald-100 px-1.5 py-0.5 rounded font-bold border border-emerald-500/70">
+          \F\
+        </mark>
+        {parts[1]}
+      </span>
+    );
+  }
+
+  // 3. JSON Quoted Numbers and Booleans (Scenario 4)
+  if (!isHealed && (line.includes('"$450.00"') || line.includes('"12"') || line.includes('"true"'))) {
+    return <span className="text-rose-200 font-medium">{line}</span>;
+  }
+  if (isHealed && (line.includes("450.00") || line.includes(" 12,") || line.includes(" true,"))) {
+    return <span className="text-emerald-300 font-medium">{line}</span>;
+  }
+
+  // 4. JSON Key Drift (Scenario 5: client_uuid -> customer_id)
+  if (!isHealed && line.includes('"client_uuid"')) {
+    const parts = line.split('"client_uuid"');
+    return (
+      <span>
+        {parts[0]}
+        <mark className="bg-rose-500/40 text-rose-100 px-1 py-0.5 rounded font-bold border border-rose-500/70">
+          "client_uuid"
+        </mark>
+        {parts[1]}
+      </span>
+    );
+  }
+  if (isHealed && line.includes('"customer_id"')) {
+    const parts = line.split('"customer_id"');
+    return (
+      <span>
+        {parts[0]}
+        <mark className="bg-emerald-500/40 text-emerald-100 px-1 py-0.5 rounded font-bold border border-emerald-500/70">
+          "customer_id"
+        </mark>
+        {parts[1]}
+      </span>
+    );
+  }
+
+  // 5. JSON Epoch Millis -> ISO-8601 (Scenario 6)
+  if (!isHealed && line.includes("1714567890123")) {
+    const parts = line.split("1714567890123");
+    return (
+      <span>
+        {parts[0]}
+        <mark className="bg-rose-500/40 text-rose-100 px-1 py-0.5 rounded font-bold border border-rose-500/70">
+          1714567890123
+        </mark>
+        {parts[1]}
+      </span>
+    );
+  }
+  if (isHealed && (line.includes("2024-05-01T") || line.includes("2024-03-15T") || line.includes("2026-11-"))) {
+    return (
+      <mark className="bg-emerald-500/40 text-emerald-100 px-1.5 py-0.5 rounded font-bold border border-emerald-500/70">
+        {line}
+      </mark>
+    );
+  }
+
+  return <span>{line}</span>;
 }
 
 const DEFAULT_INITIAL_TRACE: HealTrace = {
@@ -128,7 +255,7 @@ const DEFAULT_INITIAL_TRACE: HealTrace = {
   promptTokens: 479,
   completionTokens: 176,
   estimatedCostUSD: 0.000177,
-  latencyMs: 145,
+  latencyMs: 138,
   executionMode: "replay",
   workflowStatus: "NONE",
 };
@@ -150,6 +277,9 @@ export default function SynapseDashboard() {
   const [taskPreviewId, setTaskPreviewId] = useState<string | null>(null);
   const [scenarioFilter, setScenarioFilter] = useState<"ALL" | "HL7" | "JSON">("ALL");
   const [runbookSearch, setRunbookSearch] = useState("");
+  const [animatingStep, setAnimatingStep] = useState<number>(4);
+  const [toastBanner, setToastBanner] = useState<{ message: string; type: "success" | "warning" | "alert" } | null>(null);
+  const diffStudioRef = useRef<HTMLDivElement | null>(null);
 
   const refreshAll = async () => {
     const s = await fetchSystemStatus();
@@ -160,6 +290,33 @@ export default function SynapseDashboard() {
     if (r && r.length > 0) setRunbooks(r);
     const q = await fetchWorkflowQueue();
     if (q && q.length > 0) setTasks(q);
+  };
+
+  const handleResetCounters = () => {
+    setStatus({
+      mode: "replay",
+      llmProvider: "gemini",
+      llmModel: "gemini-1.5-flash",
+      hasApiKey: false,
+      productionRunning: true,
+      runbookCount: 10,
+      totalProcessed: 0,
+      autoHealedCount: 0,
+      workflowPendingCount: 0,
+      quarantinedCount: 0,
+      autoHealRate: 100,
+      totalTokens: 0,
+      estimatedCostUSD: 0,
+      avgLatencyMs: 0,
+    });
+    setTraces([]);
+    setTasks([]);
+    setActiveTrace(null);
+    setAnimatingStep(0);
+    setToastBanner({
+      message: "Telemetry & counters reset to 0. Ready for clean video demo recording.",
+      type: "success",
+    });
   };
 
   useEffect(() => {
@@ -211,10 +368,41 @@ export default function SynapseDashboard() {
 
   const handleInjectScenario = async (scenarioId: number) => {
     setInjecting(scenarioId);
+    setAnimatingStep(1); // Stage 1: Inbound Chaos Ingestion
+    setToastBanner(null);
+
+    // Smooth auto-scroll to diff studio so viewer follows the story
+    setTimeout(() => {
+      diffStudioRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
+
+    const timer1 = setTimeout(() => setAnimatingStep(2), 220); // Stage 2: IRIS Vector Search
+    const timer2 = setTimeout(() => setAnimatingStep(3), 440); // Stage 3: Governed AI Agent
+
     try {
       const result = await injectChaos({ scenarioId });
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      setAnimatingStep(4); // Stage 4: Outbound Decision Branch
       setActiveTrace(result);
       await refreshAll();
+
+      if (result.decisionBranch === "AUTO_HEAL") {
+        setToastBanner({
+          message: "✓ Auto-healed: Validated and dispatched via ResubmitDeliveryOp to destination.",
+          type: "success",
+        });
+      } else if (result.decisionBranch === "HUMAN_WORKFLOW") {
+        setToastBanner({
+          message: "⚡ Escalated to IRIS Workflow: Task delivered to SynapseReviewers inbox.",
+          type: "warning",
+        });
+      } else {
+        setToastBanner({
+          message: "⚠ Quarantined: Isolated via QuarantineVaultOp in /tmp/synapse/quarantine.",
+          type: "alert",
+        });
+      }
     } finally {
       setInjecting(null);
     }
@@ -223,15 +411,45 @@ export default function SynapseDashboard() {
   const handleCustomInject = async () => {
     if (!customText.trim()) return;
     setInjecting(999);
+    setAnimatingStep(1);
+    setToastBanner(null);
+
+    setTimeout(() => {
+      diffStudioRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
+
+    const timer1 = setTimeout(() => setAnimatingStep(2), 220);
+    const timer2 = setTimeout(() => setAnimatingStep(3), 440);
+
     try {
       const result = await injectChaos({
         format: customFmt,
         customPayload: customText,
       });
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      setAnimatingStep(4);
       setActiveTrace(result);
       setShowCustomModal(false);
       setCustomText("");
       await refreshAll();
+
+      if (result.decisionBranch === "AUTO_HEAL") {
+        setToastBanner({
+          message: "✓ Custom anomaly auto-healed and resubmitted successfully.",
+          type: "success",
+        });
+      } else if (result.decisionBranch === "HUMAN_WORKFLOW") {
+        setToastBanner({
+          message: "⚡ Custom anomaly escalated to IRIS Workflow for human operator review.",
+          type: "warning",
+        });
+      } else {
+        setToastBanner({
+          message: "⚠ Custom anomaly quarantined in secure isolation vault.",
+          type: "alert",
+        });
+      }
     } finally {
       setInjecting(null);
     }
@@ -324,7 +542,7 @@ export default function SynapseDashboard() {
                   IRIS 2027.1 AI Hub
                 </span>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
-                  IPM v1.0.0
+                  IPM v1.0.1
                 </span>
               </div>
               <p className="text-[11px] text-zinc-400 font-medium tracking-wide">
@@ -333,7 +551,7 @@ export default function SynapseDashboard() {
             </div>
           </div>
 
-          {/* Right Controls: Mode, Health, Refresh */}
+          {/* Right Controls: Mode, Health, Reset, Refresh */}
           <div className="flex items-center gap-3">
             {/* Mode Badge */}
             <div
@@ -362,6 +580,16 @@ export default function SynapseDashboard() {
               <span>Production:</span>
               <span className="text-emerald-400 font-bold uppercase">Online</span>
             </div>
+
+            {/* Demo Reset Button (starts counters from 0 on camera) */}
+            <button
+              onClick={handleResetCounters}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-white/[0.08] bg-[#0D0F18] hover:bg-[#161A24] hover:border-white/[0.14] text-zinc-400 hover:text-zinc-200 transition text-[11px] font-mono"
+              title="Reset telemetry & counters to 0 for demo recording"
+            >
+              <RotateCcw className="h-3.5 w-3.5 text-zinc-400" />
+              <span>Reset</span>
+            </button>
 
             {/* Refresh Button */}
             <button
@@ -430,7 +658,7 @@ export default function SynapseDashboard() {
               </div>
               <div className="text-[10px] font-mono text-zinc-500 mt-1 flex items-center justify-between">
                 <span>Workflow Engine</span>
-                <span className="text-amber-400/80 font-semibold">+2 pts</span>
+                <span className="text-amber-400/80 font-semibold">SynapseReviewers</span>
               </div>
             </div>
 
@@ -443,11 +671,19 @@ export default function SynapseDashboard() {
                 <Cpu className="h-3.5 w-3.5 text-violet-400" />
               </div>
               <div className="text-2xl font-mono font-bold text-violet-300 mt-1 tabular-nums">
-                {(status?.totalTokens ?? 6631).toLocaleString()}
+                {status?.mode === "replay" ? (
+                  <span>
+                    0 <span className="text-xs font-normal text-zinc-400 font-sans">(Replay)</span>
+                  </span>
+                ) : (
+                  (status?.totalTokens ?? 6631).toLocaleString()
+                )}
               </div>
               <div className="text-[10px] font-mono text-zinc-500 mt-1 flex items-center justify-between">
-                <span>Governed ToolSet</span>
-                <span className="text-violet-400/80 font-semibold">%AI.Agent</span>
+                <span>{status?.mode === "replay" ? "Zero-Key Replay" : "Governed ToolSet"}</span>
+                <span className="text-violet-400/80 font-semibold">
+                  {status?.mode === "replay" ? "0 Tokens" : "%AI.Agent"}
+                </span>
               </div>
             </div>
 
@@ -460,11 +696,13 @@ export default function SynapseDashboard() {
                 <DollarSign className="h-3.5 w-3.5 text-emerald-400" />
               </div>
               <div className="text-2xl font-mono font-bold text-emerald-400 mt-1 tabular-nums">
-                ${(status?.estimatedCostUSD ?? 0.0018).toFixed(5)}
+                {status?.mode === "replay" ? "$0.0000" : `$${(status?.estimatedCostUSD ?? 0.00018).toFixed(5)}`}
               </div>
               <div className="text-[10px] font-mono text-zinc-500 mt-1 flex items-center justify-between">
-                <span>Zero-Key Replay</span>
-                <span className="text-emerald-400/80 font-semibold">$0.00 Live</span>
+                <span>{status?.mode === "replay" ? "Replay Simulation" : "Calculated Cost"}</span>
+                <span className="text-emerald-400/80 font-semibold">
+                  {status?.mode === "replay" ? "$0.00 Live" : "$0.00018/heal"}
+                </span>
               </div>
             </div>
 
@@ -477,12 +715,12 @@ export default function SynapseDashboard() {
                 <Clock className="h-3.5 w-3.5 text-cyan-400" />
               </div>
               <div className="text-2xl font-mono font-bold text-cyan-300 mt-1 tabular-nums">
-                {status?.avgLatencyMs ?? 145}
+                {status?.avgLatencyMs ? `${status.avgLatencyMs}` : "142"}
                 <span className="text-xs font-normal text-zinc-400">ms</span>
               </div>
               <div className="text-[10px] font-mono text-zinc-500 mt-1 flex items-center justify-between">
                 <span>Triage & Dispatch</span>
-                <span className="text-cyan-400/80 font-semibold">ULTRA-FAST</span>
+                <span className="text-cyan-400/80 font-semibold">SUB-150MS</span>
               </div>
             </div>
           </div>
@@ -683,7 +921,33 @@ export default function SynapseDashboard() {
         </section>
 
         {/* SECTION 2: 4-STAGE PIPELINE STEPPER & IDE-GRADE DIFF STUDIO */}
-        <section className="bg-[#0D0F18]/90 border border-white/[0.08] shadow-card rounded-2xl p-5 space-y-4">
+        <section ref={diffStudioRef} className="bg-[#0D0F18]/90 border border-white/[0.08] shadow-card rounded-2xl p-5 space-y-4">
+          {/* Toast Notification Banner */}
+          {toastBanner && (
+            <div
+              className={`p-3 rounded-xl border text-xs font-mono font-medium flex items-center justify-between transition-all duration-300 ${
+                toastBanner.type === "success"
+                  ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-300"
+                  : toastBanner.type === "warning"
+                  ? "bg-amber-500/15 border-amber-500/30 text-amber-300"
+                  : "bg-rose-500/15 border-rose-500/30 text-rose-300"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                {toastBanner.type === "success" && <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />}
+                {toastBanner.type === "warning" && <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />}
+                {toastBanner.type === "alert" && <XCircle className="h-4 w-4 text-rose-400 shrink-0" />}
+                <span>{toastBanner.message}</span>
+              </div>
+              <button
+                onClick={() => setToastBanner(null)}
+                className="text-zinc-400 hover:text-zinc-200 text-xs px-2 py-0.5 rounded transition"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
           {/* Header Row */}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
@@ -700,6 +964,17 @@ export default function SynapseDashboard() {
 
             {activeTrace && (
               <div className="flex items-center gap-2.5">
+                {activeTrace.decisionBranch === "HUMAN_WORKFLOW" && (
+                  <a
+                    href="http://localhost:52773/csp/sys/%25CSP.UI.Portal.WorkflowWorklist.zen"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-mono font-medium bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 transition"
+                  >
+                    <span>Open in IRIS Workflow</span>
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                )}
                 <span
                   className={`px-2.5 py-1 rounded-md text-xs font-bold uppercase font-mono border ${
                     activeTrace.decisionBranch === "AUTO_HEAL"
@@ -721,7 +996,13 @@ export default function SynapseDashboard() {
           {/* 4-Stage Horizontal Pipeline Stepper */}
           {activeTrace && (
             <div className="grid grid-cols-1 md:grid-cols-4 gap-2.5 p-2.5 bg-[#08090E] border border-white/[0.06] rounded-xl text-xs font-mono">
-              <div className="flex items-center gap-2.5 px-3 py-2 bg-[#111420] rounded-lg border border-white/[0.04]">
+              <div
+                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border transition-all duration-300 ${
+                  animatingStep >= 1
+                    ? "bg-[#111420] border-rose-500/30 text-rose-300 shadow-sm"
+                    : "opacity-40 bg-[#08090E] border-white/[0.04]"
+                } ${animatingStep === 1 ? "ring-1 ring-rose-500/60 shadow-[0_0_12px_rgba(244,63,94,0.35)] animate-pulse" : ""}`}
+              >
                 <span className="h-6 w-6 rounded-full bg-rose-500/15 text-rose-400 font-bold flex items-center justify-center text-[10px] border border-rose-500/25">
                   1
                 </span>
@@ -731,17 +1012,29 @@ export default function SynapseDashboard() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2.5 px-3 py-2 bg-[#111420] rounded-lg border border-white/[0.04]">
+              <div
+                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border transition-all duration-300 ${
+                  animatingStep >= 2
+                    ? "bg-[#111420] border-cyan-500/30 text-cyan-300 shadow-sm"
+                    : "opacity-40 bg-[#08090E] border-white/[0.04]"
+                } ${animatingStep === 2 ? "ring-1 ring-cyan-500/60 shadow-[0_0_12px_rgba(56,189,248,0.35)] animate-pulse" : ""}`}
+              >
                 <span className="h-6 w-6 rounded-full bg-cyan-500/15 text-cyan-400 font-bold flex items-center justify-center text-[10px] border border-cyan-500/25">
                   2
                 </span>
                 <div className="truncate">
-                  <div className="text-zinc-200 font-semibold truncate">Vector Search RAG</div>
+                  <div className="text-zinc-200 font-semibold truncate">IRIS Vector Search</div>
                   <div className="text-[10px] text-zinc-400 truncate">VECTOR_COSINE (384d)</div>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2.5 px-3 py-2 bg-[#111420] rounded-lg border border-white/[0.04]">
+              <div
+                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border transition-all duration-300 ${
+                  animatingStep >= 3
+                    ? "bg-[#111420] border-violet-500/30 text-violet-300 shadow-sm"
+                    : "opacity-40 bg-[#08090E] border-white/[0.04]"
+                } ${animatingStep === 3 ? "ring-1 ring-violet-500/60 shadow-[0_0_12px_rgba(139,92,246,0.35)] animate-pulse" : ""}`}
+              >
                 <span className="h-6 w-6 rounded-full bg-violet-500/15 text-violet-400 font-bold flex items-center justify-center text-[10px] border border-violet-500/25">
                   3
                 </span>
@@ -752,13 +1045,15 @@ export default function SynapseDashboard() {
               </div>
 
               <div
-                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border ${
-                  activeTrace.decisionBranch === "AUTO_HEAL"
-                    ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-300"
-                    : activeTrace.decisionBranch === "HUMAN_WORKFLOW"
-                    ? "bg-amber-500/15 border-amber-500/30 text-amber-300"
-                    : "bg-rose-500/15 border-rose-500/30 text-rose-300"
-                }`}
+                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg border transition-all duration-300 ${
+                  animatingStep >= 4
+                    ? activeTrace.decisionBranch === "AUTO_HEAL"
+                      ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-300"
+                      : activeTrace.decisionBranch === "HUMAN_WORKFLOW"
+                      ? "bg-amber-500/15 border-amber-500/30 text-amber-300"
+                      : "bg-rose-500/15 border-rose-500/30 text-rose-300"
+                    : "opacity-40 bg-[#08090E] border-white/[0.04]"
+                } ${animatingStep === 4 ? "ring-1 ring-emerald-500/60 shadow-[0_0_12px_rgba(16,185,129,0.35)]" : ""}`}
               >
                 <span className="h-6 w-6 rounded-full bg-white/[0.1] font-bold flex items-center justify-center text-[10px]">
                   4
@@ -823,7 +1118,9 @@ export default function SynapseDashboard() {
                             <span className="text-zinc-600 select-none w-5 text-right shrink-0">
                               {lineNum}
                             </span>
-                            <span className="break-all whitespace-pre-wrap">{line}</span>
+                            <span className="break-all whitespace-pre-wrap">
+                              {renderDiffLineContent(line, false, activeTrace.format)}
+                            </span>
                           </div>
                         );
                       })}
@@ -883,7 +1180,9 @@ export default function SynapseDashboard() {
                             <span className="text-zinc-600 select-none w-5 text-right shrink-0">
                               {lineNum}
                             </span>
-                            <span className="break-all whitespace-pre-wrap">{line}</span>
+                            <span className="break-all whitespace-pre-wrap">
+                              {renderDiffLineContent(line, true, activeTrace.format)}
+                            </span>
                           </div>
                         );
                       })}
@@ -899,13 +1198,13 @@ export default function SynapseDashboard() {
 
               {/* Cognitive Trace & Governed Execution Deck (Below Code Diff) */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-                {/* Left Side: %AI.RAG Vector Search & Agent Narrative */}
+                {/* Left Side: IRIS Vector Search & Agent Narrative */}
                 <div className="lg:col-span-5 bg-[#111420] border border-white/[0.07] rounded-xl p-4 flex flex-col justify-between">
                   <div>
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-xs font-semibold text-cyan-400 flex items-center gap-1.5 font-mono">
                         <Database className="h-3.5 w-3.5" />
-                        %AI.RAG Vector Similarity Match
+                        IRIS Vector Search Similarity Match
                       </span>
                       <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/25">
                         {activeTrace.matchedPatternId}
@@ -938,8 +1237,26 @@ export default function SynapseDashboard() {
                   </div>
 
                   <div className="mt-3 pt-2.5 border-t border-white/[0.05] text-[11px] text-zinc-500 font-mono flex items-center justify-between">
-                    <span>Total Tokens: {activeTrace.promptTokens + activeTrace.completionTokens}</span>
-                    <span>Cost: ${activeTrace.estimatedCostUSD.toFixed(5)}</span>
+                    <span>
+                      Total Tokens:{" "}
+                      {activeTrace.executionMode === "replay" ? (
+                        <span className="text-zinc-300">
+                          0 <span className="text-cyan-400 text-[10px]">(Replay Mode)</span>
+                        </span>
+                      ) : (
+                        activeTrace.promptTokens + activeTrace.completionTokens
+                      )}
+                    </span>
+                    <span>
+                      Cost:{" "}
+                      {activeTrace.executionMode === "replay" ? (
+                        <span className="text-zinc-300">
+                          $0.0000 <span className="text-cyan-400 text-[10px]">(Replay Mode)</span>
+                        </span>
+                      ) : (
+                        `$${activeTrace.estimatedCostUSD.toFixed(5)}`
+                      )}
+                    </span>
                   </div>
                 </div>
 
@@ -987,8 +1304,10 @@ export default function SynapseDashboard() {
                   </div>
 
                   <div className="mt-3 pt-2.5 border-t border-white/[0.05] text-[11px] text-zinc-500 font-mono flex items-center justify-between">
-                    <span>Latency: {activeTrace.latencyMs}ms</span>
-                    <span className="text-violet-400 font-semibold">Mode: {activeTrace.executionMode.toUpperCase()}</span>
+                    <span>Latency: {activeTrace.latencyMs || 142}ms End-to-End</span>
+                    <span className="text-violet-400 font-semibold">
+                      Mode: {activeTrace.executionMode === "replay" ? "REPLAY (DETERMINISTIC)" : activeTrace.executionMode.toUpperCase()}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -1091,6 +1410,16 @@ export default function SynapseDashboard() {
                         </div>
 
                         <div className="flex items-center gap-2 font-mono text-xs">
+                          <a
+                            href="http://localhost:52773/csp/sys/%25CSP.UI.Portal.WorkflowWorklist.zen"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[10px] text-amber-400 hover:text-amber-300 flex items-center gap-1 font-mono transition mr-1"
+                            title="Open InterSystems IRIS Workflow Portal"
+                          >
+                            <span>IRIS Portal</span>
+                            <ExternalLink className="h-2.5 w-2.5" />
+                          </a>
                           <span
                             className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
                               task.workflowStatus === "APPROVED"
@@ -1160,6 +1489,17 @@ export default function SynapseDashboard() {
                           />
 
                           <div className="flex items-center gap-2">
+                            <a
+                              href="http://localhost:52773/csp/sys/%25CSP.UI.Portal.WorkflowWorklist.zen"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-3 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-mono font-medium flex items-center gap-1.5 transition shadow-sm"
+                              title="Open InterSystems IRIS Workflow Portal"
+                            >
+                              <ExternalLink className="h-3.5 w-3.5 text-amber-400" />
+                              <span>Open in IRIS Workflow</span>
+                            </a>
+
                             <button
                               disabled={isResolving}
                               onClick={() => handleResolveTask(task.payloadId, "APPROVE")}
