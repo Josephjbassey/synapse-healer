@@ -182,6 +182,14 @@ ClassMethod InjectChaos() As %Status
     Set result.executionMode = resp.ExecutionMode
     Set result.timestamp = $ZDateTime($Horolog, 3)
 
+    // HUMAN_WORKFLOW: also send the escalation through the production so a real
+    // InterSystems Workflow task is created for the SynapseReviewers role (best effort)
+    Set result.workflowTaskQueued = 0
+    If resp.DecisionBranch = "HUMAN_WORKFLOW" {
+        Do ##class(Synapse.Service.WorkflowDispatchService).Dispatch(resp, .queued)
+        Set result.workflowTaskQueued = +$Get(queued)
+    }
+
     Write result.%ToJSON()
     Quit $$$OK
 }
@@ -367,6 +375,11 @@ ClassMethod ResolveWorkflowTask() As %Status
         Set res.payloadId = payloadId
         Set res.action = action
         Set res.status = $Select(action="APPROVE":"APPROVED", 1:"REJECTED")
+        // Report the stored status (a task resolved earlier keeps its first decision)
+        Set stored = $ListGet($Get(^Synapse.WorkflowQueue("tasks", payloadId)), 5)
+        If (stored = "APPROVED") || (stored = "REJECTED") Set res.status = stored
+        // Close the matching task in the IRIS Workflow inbox as well (best effort)
+        Do ##class(Synapse.Operation.WorkflowEscalationOp).CloseEngineTask(payloadId, $Select(res.status="APPROVED":"Approve", 1:"Reject"))
         Set res.message = "Workflow task successfully resolved with action: " _ action
     } Else {
         Set res.ok = 0
