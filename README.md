@@ -4,8 +4,7 @@
 *InterSystems Programming Contest: AI Agents in Interoperability Workflows*
 
 [![InterSystems IRIS](https://img.shields.io/badge/InterSystems%20IRIS-2027.1%20AI%20Hub-blue.svg)](https://evaluation.intersystems.com/Eval/early-access/AIHub)
-[![IPM Package](https://img.shields.io/badge/IPM-synapse--healer%20v1.0.0-emerald.svg)](module.xml)
-[![Bonus Points](https://img.shields.io/badge/Contest%20Bonus%20Points-+11%20pts-purple.svg)](#-contest-scorecard--bonus-points)
+[![IPM Package](https://img.shields.io/badge/IPM-synapse--healer%20v1.0.1-emerald.svg)](module.xml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
@@ -31,18 +30,23 @@ In enterprise healthcare and commerce, the **Dead-Letter Queue (DLQ)** is notori
 
 ---
 
-## 🏆 Contest Scorecard & Bonus Points
+## 🏆 Contest Bonuses
 
-SynapseHealer was architected specifically to maximize all technical criteria and bonus opportunities of the **AI Agents in Interoperability Workflows** programming contest:
+Point values are the official ones from the [Technology Bonuses post](https://community.intersystems.com/post/technology-bonuses-intersystems-programming-contest-ai-agents-interoperability-workflows). The organisers decide what is awarded; the [bonus results table](https://community.intersystems.com/post/technology-bonus-results-intersystems-programming-contest-ai-agents-interoperability-workflows) is the source of truth.
 
-| Contest Category | Implementation Details | Bonus Score |
-| :--- | :--- | :---: |
-| **Custom Inbound Adapter** | [`Synapse.Adapter.DeadLetterInbound`](src/Synapse/Adapter/DeadLetterInbound.cls) extending `Ens.InboundAdapter` with automated polling and chaos payload generators | **+3 Points** |
-| **Embedded Python** | `[ Language = python ]` methods in adapter, RAG vector computation, and deterministic transformation routines | **+2 Points** |
-| **Vector Search (%AI.RAG)** | Native `VECTOR(DOUBLE, 384)` datatype in [`Synapse.RAG.HealingRunbook`](src/Synapse/RAG/HealingRunbook.cls) with SQL `VECTOR_COSINE` search | **+2 Points** |
-| **InterSystems Workflow Engine** | [`Synapse.Operation.WorkflowEscalationOp`](src/Synapse/Operation/WorkflowEscalationOp.cls) generating `EnsLib.Workflow.TaskRequest` for human operator review | **+2 Points** |
-| **InterSystems Package Manager** | Certified [`module.xml`](module.xml) with `<SystemRequirements Version=">=2026.3" Interoperability="enabled"/>` and automated `SetupAll` initialization | **+2 Points** |
-| **Total Contest Bonus Points** | | **+11 Points** |
+| Bonus | Points | Where it is in SynapseHealer | Status |
+| :--- | :---: | :--- | :--- |
+| Custom Adapter | 2 | [`Synapse.Adapter.DeadLetterInbound`](src/Synapse/Adapter/DeadLetterInbound.cls) extends `Ens.InboundAdapter` (file drop polling plus a chaos generator) and is the adapter of [`Synapse.Service.ChaosIngestService`](src/Synapse/Service/ChaosIngestService.cls) | Awarded |
+| Embedded Python | 3 | `[ Language = python ]` methods: embeddings in [`SchemaKnowledgeBase`](src/Synapse/RAG/SchemaKnowledgeBase.cls), repair routines in [`AuditTelemetry`](src/Synapse/Data/AuditTelemetry.cls), validation and risk tools in [`HealerTools`](src/Synapse/Agent/HealerTools.cls) | Awarded |
+| IRIS Vector Search | 2 | `VECTOR(DOUBLE, 384)` column in [`Synapse.RAG.HealingRunbook`](src/Synapse/RAG/HealingRunbook.cls), searched with SQL `VECTOR_COSINE` | Awarded |
+| Docker | 2 | [`Dockerfile`](Dockerfile) and [`docker-compose.yml`](docker-compose.yml), `docker compose up -d` | Awarded |
+| First article on DC | 2 | [Building SynapseHealer: my journey creating a self-healing data pipeline](https://community.intersystems.com/post/building-synapsehealer-my-journey-creating-self-healing-data-pipeline) | Awarded |
+| Video | 3 | [`docs/demo/synapse-healer-walkthrough.mp4`](docs/demo/synapse-healer-walkthrough.mp4), downloadable without signing in | Awarded |
+| Workflow Engine | 2 | Escalations become `EnsLib.Workflow.TaskRequest` tasks for the **SynapseReviewers** role, delivered by the `EnsLib.Workflow.Operation` item of the same name in [`Synapse.Production`](src/Synapse/Production.cls). The role and its reviewers are created by [`Synapse.Config.WorkflowSetup`](src/Synapse/Config/WorkflowSetup.cls); Approve/Reject in the Workflow inbox is handled by [`Synapse.Workflow.ReviewTaskResponse`](src/Synapse/Workflow/ReviewTaskResponse.cls). See [Human review with the Workflow Engine](#human-review-with-the-workflow-engine) | Requested |
+| ZPM / IPM package | 2 | [`module.xml`](module.xml), `zpm "install synapse-healer"` | Requested once the package is published |
+| Second article on DC | 1 | _link to be added when published_ | Not yet |
+
+Not claimed: Questionnaire, PEX, online demo, AI Hub or Embedded Python bug reports, Community Idea.
 
 ---
 
@@ -105,6 +109,8 @@ SynapseHealer includes ready-to-test runbooks and regression handlers for 7 cano
 SynapseHealer runs on the official **InterSystems IRIS Community AI Hub Early Access Program (EAP)** build:
 - **EAP Download Portal**: [https://evaluation.intersystems.com/Eval/early-access/AIHub](https://evaluation.intersystems.com/Eval/early-access/AIHub)
 - Supported builds: `2027.1.0AI.109.0` or `2026.3.0AI.154.0`.
+
+> **Why build 109?** The contest announcement asks for build 154, but by early November the EAP portal only offered the 2027.1 builds. The organisers confirmed in the announcement comments that build 109 can be used and that judges will use the build each app names. SynapseHealer is developed and tested on `2027.1.0AI.109.0`; `module.xml` keeps `Version=">=2026.3"` so it also installs on 154.
 
 #### Loading the Docker Tarball
 ```bash
@@ -238,22 +244,41 @@ curl -X POST -u _SYSTEM:SYS http://localhost:52773/api/synapse/workflow/resolve 
 
 ---
 
-## 📦 InterSystems Package Manager (IPM / ZPM)
+## Human review with the Workflow Engine
 
-SynapseHealer is packaged as an official IPM module certified for InterSystems IRIS:
-- Manifest: [`module.xml`](module.xml)
-- Declared dependencies: `<SystemRequirements Version=">=2026.3" Interoperability="enabled"/>`
+When the agent's decision is `HUMAN_WORKFLOW` (medium confidence or risky repairs), the payload is not resubmitted until a person decides.
 
-### Installation via IPM:
-```objectscript
-// Inside IRIS terminal or container:
-zpm "install synapse-healer"
+1. `Synapse.Process.DeadLetterHealerBP` sends the `HealResponse` to `Synapse.Operation.WorkflowEscalationOp`. Payloads injected through `POST /api/synapse/inject` reach the same operation through `Synapse.Service.WorkflowDispatchService`.
+2. `WorkflowEscalationOp` records the task in `^Synapse.WorkflowQueue` (used by the dashboard) and sends an `EnsLib.Workflow.TaskRequest` with actions `Approve,Reject` to the production item **SynapseReviewers** (class `EnsLib.Workflow.Operation`). The Workflow Engine uses that item name as the role, so the task appears in the Workflow inbox of every member of the role.
+3. `Synapse.Config.WorkflowSetup.Setup()` creates the role and adds the reviewers (default `_SYSTEM,SuperUser`; override with the `SYNAPSE_REVIEWERS` environment variable). It runs from `iris.script` during the Docker build and from `SetupAll` during an IPM install, and it is safe to run again.
+4. A reviewer approves or rejects in **Management Portal > Interoperability > Workflow Inbox**. The task handler `Synapse.Workflow.ReviewTaskResponse.OnAction` calls the same `Approve()` / `Reject()` methods as the dashboard: approve resubmits through `ResubmitDeliveryOp`, reject goes to `QuarantineVaultOp`.
+5. The dashboard and `POST /api/synapse/workflow/resolve` still work. A decision taken there also removes the task from the Workflow inbox, and whichever decision comes first wins; a second decision on the same payload changes nothing.
 
-// Or test load from source:
-zpm "load /opt/irisapp -v"
+### Smoke test
+
+With the container running:
+
+```bash
+./scripts/smoke_test.sh synapse-iris SYNAPSE
 ```
 
-The module automatically executes `<Invoke Method="SetupAll" Class="Synapse.Config.AIHubSetup"/>` upon installation, configuring AI Hub credentials, seeding the 10 vector runbooks, loading historical telemetry, and auto-starting the Interoperability Production `Synapse.Production`.
+It runs `Synapse.Test.WorkflowSmoke.Run()`, which checks that the role and reviewers exist, that an escalation creates a Workflow task for **SynapseReviewers**, that approving it through the Workflow Engine resubmits the payload, that dashboard decisions clear the inbox, and that the seven replay scenarios still produce decisions. It prints one PASS/FAIL line per check.
+
+---
+
+## 📦 InterSystems Package Manager (IPM / ZPM)
+
+- Manifest: [`module.xml`](module.xml) (module `synapse-healer`, version 1.0.1)
+- Requirement: `<SystemRequirements Version=">=2026.3" Interoperability="enabled"/>`, so it needs an AI Hub build (154 or 109) and a namespace with Interoperability enabled.
+- Installs the `Synapse` package, the `/api/synapse` web application, and runs `Synapse.Config.AIHubSetup.SetupAll()` (credentials, Workflow role, runbooks, replay telemetry, production start).
+
+```objectscript
+// From the community registry (after the package is published):
+zpm "install synapse-healer"
+
+// From a local clone:
+zpm "load /path/to/synapse-healer -v"
+```
 
 ---
 
@@ -261,11 +286,11 @@ The module automatically executes `<Invoke Method="SetupAll" Class="Synapse.Conf
 
 | Class | Type | Purpose |
 | :--- | :--- | :--- |
-| [`Synapse.Adapter.DeadLetterInbound`](src/Synapse/Adapter/DeadLetterInbound.cls) | `Ens.InboundAdapter` | Custom Inbound Adapter with Embedded Python chaos generator (**+3 pts**) |
+| [`Synapse.Adapter.DeadLetterInbound`](src/Synapse/Adapter/DeadLetterInbound.cls) | `Ens.InboundAdapter` | Custom Inbound Adapter with Embedded Python chaos generator |
 | [`Synapse.Service.ChaosIngestService`](src/Synapse/Service/ChaosIngestService.cls) | `Ens.BusinessService` | Inbound Business Service auditing DLQ events to `^Synapse.DLQ` |
 | [`Synapse.Msg.DeadLetterRequest`](src/Synapse/Msg/DeadLetterRequest.cls) | `Ens.Request` | Inbound payload container with global character stream helpers |
 | [`Synapse.Msg.HealResponse`](src/Synapse/Msg/HealResponse.cls) | `Ens.Response` | Outbound response carrying healed content, confidence, risk, and tool traces |
-| [`Synapse.RAG.HealingRunbook`](src/Synapse/RAG/HealingRunbook.cls) | `%Persistent` | IRIS Vector Search table with `VECTOR(DOUBLE, 384)` (**+2 pts**) |
+| [`Synapse.RAG.HealingRunbook`](src/Synapse/RAG/HealingRunbook.cls) | `%Persistent` | IRIS Vector Search table with `VECTOR(DOUBLE, 384)` |
 | [`Synapse.RAG.SchemaKnowledgeBase`](src/Synapse/RAG/SchemaKnowledgeBase.cls) | Utility | Vector embedding generator and SQL `VECTOR_COSINE` search engine |
 | [`Synapse.Config.AIHubSetup`](src/Synapse/Config/AIHubSetup.cls) | Config | Secure IRIS Wallet credential manager and AI Hub configuration |
 | [`Synapse.Data.AuditTelemetry`](src/Synapse/Data/AuditTelemetry.cls) | `%Persistent` | Persistent telemetry table and Deterministic Replay Engine |
@@ -274,7 +299,11 @@ The module automatically executes `<Invoke Method="SetupAll" Class="Synapse.Conf
 | [`Synapse.Agent.DeadLetterHealerAgent`](src/Synapse/Agent/DeadLetterHealerAgent.cls) | `%AI.Agent` | Autonomous schema diagnosis and repair agent |
 | [`Synapse.Process.DeadLetterHealerBP`](src/Synapse/Process/DeadLetterHealerBP.cls) | `Ens.BusinessProcess` | Core triage coordinator and arbitrator |
 | [`Synapse.Operation.ResubmitDeliveryOp`](src/Synapse/Operation/ResubmitDeliveryOp.cls) | `Ens.BusinessOperation` | Outbound delivery operation to `/tmp/synapse/delivered` |
-| [`Synapse.Operation.WorkflowEscalationOp`](src/Synapse/Operation/WorkflowEscalationOp.cls) | `Ens.BusinessOperation` | InterSystems Workflow Engine HITL queue operation (**+2 pts**) |
+| [`Synapse.Operation.WorkflowEscalationOp`](src/Synapse/Operation/WorkflowEscalationOp.cls) | `Ens.BusinessOperation` | Records escalations and sends Workflow tasks to the SynapseReviewers role |
+| [`Synapse.Config.WorkflowSetup`](src/Synapse/Config/WorkflowSetup.cls) | Config | Creates the SynapseReviewers Workflow role and its reviewers (idempotent) |
+| [`Synapse.Workflow.ReviewTaskResponse`](src/Synapse/Workflow/ReviewTaskResponse.cls) | `EnsLib.Workflow.TaskResponse` | Applies Approve/Reject from the Workflow inbox |
+| [`Synapse.Service.WorkflowDispatchService`](src/Synapse/Service/WorkflowDispatchService.cls) | `Ens.BusinessService` | Sends REST-injected escalations into the production |
+| [`Synapse.Test.WorkflowSmoke`](src/Synapse/Test/WorkflowSmoke.cls) | Test | Workflow and simulation smoke test |
 | [`Synapse.Operation.QuarantineVaultOp`](src/Synapse/Operation/QuarantineVaultOp.cls) | `Ens.BusinessOperation` | Outbound isolation operation to `/tmp/synapse/quarantine` |
 | [`Synapse.Production`](src/Synapse/Production.cls) | `Ens.Production` | Complete Interoperability pipeline wiring all services, processes, and operations |
 | [`Synapse.REST.Dispatch`](src/Synapse/REST/Dispatch.cls) | `%CSP.REST` | REST dispatch handler mapped to `/api/synapse` |
