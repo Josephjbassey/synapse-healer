@@ -3,13 +3,24 @@
   <Document name="synapse-healer.ZPM">
     <Module>
       <Name>synapse-healer</Name>
-      <Version>1.0.0</Version>
+      <Version>1.0.1</Version>
       <Description>SynapseHealer: Autonomous Dead-Letter and Schema Healer for InterSystems IRIS Interoperability</Description>
+      <Keywords>interoperability,ai-hub,workflow,vector-search,embedded-python</Keywords>
+      <Author>
+        <Person>Joseph Bassey John</Person>
+      </Author>
       <Packaging>module</Packaging>
+      <SystemRequirements Version=">=2026.3" Interoperability="enabled"/>
       <SourcesRoot>src</SourcesRoot>
       <Resource Name="Synapse.PKG"/>
-      <Invoke Method="SetupAll" Class="Synapse.Config.AIHubSetup"/>
-      <SystemRequirements Version=">=2026.3" Interoperability="enabled"/>
+      <WebApplication
+        Url="/api/synapse"
+        DispatchClass="Synapse.REST.Dispatch"
+        MatchRoles=":%All"
+        AutheEnabled="96"
+        Recurse="1"
+        CookiePath="/api/synapse/"/>
+      <Invoke Class="Synapse.Config.AIHubSetup" Method="SetupAll"/>
     </Module>
   </Document>
 </Export>

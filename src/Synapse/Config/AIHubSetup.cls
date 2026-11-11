@@ -45,17 +45,36 @@ ClassMethod Configure() As %Status
 ClassMethod SetupAll() As %Status
 {
     Set sc = ..Configure()
+    Do ##class(Synapse.Config.WorkflowSetup).Setup()
     Do ##class(Synapse.RAG.SchemaKnowledgeBase).SeedRunbooks()
     Do ##class(Synapse.Data.AuditTelemetry).SeedReplayTelemetry()
     Try {
         If ##class(%Dictionary.CompiledClass).%ExistsId("Ens.Director") {
-            If '##class(Ens.Director).IsProductionRunning() {
-                Do ##class(Ens.Director).SetAutoStart("Synapse.Production")
-                Do ##class(Ens.Director).StartProduction("Synapse.Production")
+            Do ##class(Ens.Director).SetAutoStart("Synapse.Production")
+            If $TLevel > 0 {
+                // IPM runs <Invoke> inside a transaction; starting a production there breaks
+                // the installer's commit, so start it from a background job instead
+                Job ##class(Synapse.Config.AIHubSetup).StartProduction()
+            } Else {
+                Do ..StartProduction()
             }
         }
     } Catch ex {}
     Return $$$OK
+}
+
+/// Starts Synapse.Production if no production is running in this namespace
+ClassMethod StartProduction() As %Status
+{
+    Set tSC = $$$OK
+    Try {
+        If '##class(Ens.Director).IsProductionRunning() {
+            Set tSC = ##class(Ens.Director).StartProduction("Synapse.Production")
+        }
+    } Catch ex {
+        Set tSC = ex.AsStatus()
+    }
+    Quit tSC
 }
 
 /// Resolves active LLM Provider configuration from environment or secure storage
