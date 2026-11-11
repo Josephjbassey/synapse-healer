@@ -57,6 +57,7 @@ if ##class(%File).Exists("/opt/irisapp/module.xml") && $data(^|"%SYS"|SYS("ZPM")
 
 ; 11. Seed Knowledge Base Runbooks, baseline Telemetry, and configure AI Hub
 do ##class(Synapse.Config.AIHubSetup).Configure()
+do ##class(Synapse.Config.WorkflowSetup).Setup(1)
 do ##class(Synapse.RAG.SchemaKnowledgeBase).SeedRunbooks()
 do ##class(Synapse.Data.AuditTelemetry).SeedReplayTelemetry()
 
@@ -65,7 +66,7 @@ do ##class(Ens.Director).SetAutoStart("Synapse.Production")
 do ##class(Ens.Director).StartProduction("Synapse.Production")
 
 ; 13. Also load and initialize in IRISAPP for judge compatibility if present
-if ##class(%SYS.Namespace).Exists("IRISAPP") { zn "IRISAPP" if ##class(%File).DirectoryExists("/opt/irisapp/src") do $system.OBJ.LoadDir("/opt/irisapp/src", "ck", .err2, 1) do ##class(Synapse.Config.AIHubSetup).Configure() do ##class(Synapse.RAG.SchemaKnowledgeBase).SeedRunbooks() do ##class(Synapse.Data.AuditTelemetry).SeedReplayTelemetry() }
+if ##class(%SYS.Namespace).Exists("IRISAPP") { zn "IRISAPP" if ##class(%File).DirectoryExists("/opt/irisapp/src") do $system.OBJ.LoadDir("/opt/irisapp/src", "ck", .err2, 1) do ##class(Synapse.Config.AIHubSetup).Configure() do ##class(Synapse.Config.WorkflowSetup).Setup() do ##class(Synapse.RAG.SchemaKnowledgeBase).SeedRunbooks() do ##class(Synapse.Data.AuditTelemetry).SeedReplayTelemetry() }
 
 zn "SYNAPSE"
 halt
