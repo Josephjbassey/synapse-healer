@@ -21,11 +21,14 @@ XData ProductionDefinition
   </Item>
   <Item Name="Synapse.Operation.WorkflowEscalationOp" Category="Workflow" ClassName="Synapse.Operation.WorkflowEscalationOp" PoolSize="1" Enabled="true" Foreground="false">
     <Setting Target="Host" Name="WorkflowRole">SynapseReviewers</Setting>
-    <Setting Target="Host" Name="WorkflowOperation">EnsLib.Workflow.Operation</Setting>
+    <Setting Target="Host" Name="WorkflowOperation">SynapseReviewers</Setting>
   </Item>
   <Item Name="Synapse.Operation.QuarantineVaultOp" Category="Quarantine" ClassName="Synapse.Operation.QuarantineVaultOp" PoolSize="1" Enabled="true" Foreground="false">
   </Item>
-  <Item Name="EnsLib.Workflow.Operation" Category="Workflow" ClassName="EnsLib.Workflow.Operation" PoolSize="1" Enabled="true" Foreground="false">
+  <Item Name="SynapseReviewers" Category="Workflow" ClassName="EnsLib.Workflow.Operation" PoolSize="1" Enabled="true" Foreground="false" Comment="Workflow role operation: its name is the Workflow role that receives review tasks">
+    <Setting Target="Host" Name="AutoCreateRole">1</Setting>
+  </Item>
+  <Item Name="Synapse.Service.WorkflowDispatchService" Category="Workflow" ClassName="Synapse.Service.WorkflowDispatchService" PoolSize="0" Enabled="true" Foreground="false" Comment="Lets the REST API send HUMAN_WORKFLOW escalations into the production">
   </Item>
 </Production>
 }
