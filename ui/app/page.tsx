@@ -542,7 +542,7 @@ export default function SynapseDashboard() {
                   IRIS 2027.1 AI Hub
                 </span>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
-                  IPM v1.0.1
+                  IPM v1.0.2
                 </span>
               </div>
               <p className="text-[11px] text-zinc-400 font-medium tracking-wide">
