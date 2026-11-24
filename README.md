@@ -102,6 +102,12 @@ SynapseHealer includes ready-to-test runbooks and regression handlers for 7 cano
 
 ---
 
+## 🔍 Paired Example: Repaired vs Quarantined
+
+A worked example of two near-identical JSON order failures — the same stringified quantities and currency-prefixed prices, except Case B has a trailing comma — is in [`docs/paired-example.md`](docs/paired-example.md). Case A is auto-repaired (`AUTO_HEAL`) with every changed field listed; Case B is isolated (`QUARANTINE`) because `json.loads` fails before any field can be rewritten. That is the deciding check in the deterministic replay engine.
+
+---
+
 ## 🚀 Quick-Start Guide for Judges
 
 ### 1. Prerequisites & InterSystems IRIS AI Hub Container Image
